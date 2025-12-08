@@ -1,0 +1,690 @@
+{
+	"info": {
+		"_postman_id": "newchatapp-api-collection",
+		"name": "NewChatApp API",
+		"description": "Complete API collection for WhatsApp-like chat app backend",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Login (Mobile)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    if (jsonData.success && jsonData.token) {",
+									"        pm.environment.set('jwt_token', jsonData.token);",
+									"        pm.environment.set('testUserId', jsonData.user.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone\": \"9033868859\",\n  \"password\": \"test1234\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "login"]
+						},
+						"description": "Login with phone number and password (Mobile authentication)"
+					},
+					"response": []
+				},
+				{
+					"name": "QR Login Flow",
+					"item": [
+						{
+							"name": "Create QR Challenge",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 200) {",
+											"    const jsonData = pm.response.json();",
+											"    pm.environment.set('challengeId', jsonData.challengeId);",
+											"    pm.environment.set('qrPayload', jsonData.qrPayload);",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/auth/qr-challenge",
+									"host": ["{{base_url}}"],
+									"path": ["auth", "qr-challenge"]
+								},
+								"description": "Create a new QR challenge token for desktop login"
+							},
+							"response": []
+						},
+						{
+							"name": "Scan QR Code (Mobile)",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 200) {",
+											"    const jsonData = pm.response.json();",
+											"    pm.environment.set('challengeId', jsonData.challengeId);",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{jwt_token}}"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"token\": \"{{qrPayload}}\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/auth/qr-scan",
+									"host": ["{{base_url}}"],
+									"path": ["auth", "qr-scan"]
+								},
+								"description": "Mobile app scans QR code and authorizes (userId extracted from JWT token)"
+							},
+							"response": []
+						},
+						{
+							"name": "Check QR Status",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/auth/qr-status?challengeId={{challengeId}}",
+									"host": ["{{base_url}}"],
+									"path": ["auth", "qr-status"],
+									"query": [
+										{
+											"key": "challengeId",
+											"value": "{{challengeId}}"
+										}
+									]
+								},
+								"description": "Check QR challenge status (pending/authorized/expired)"
+							},
+							"response": []
+						},
+						{
+							"name": "Confirm QR Challenge",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 200) {",
+											"    const jsonData = pm.response.json();",
+											"    if (jsonData.success && jsonData.token) {",
+											"        pm.environment.set('jwt_token', jsonData.token);",
+											"        if (jsonData.user && jsonData.user.id) {",
+											"            pm.environment.set('testUserId', jsonData.user.id);",
+											"        }",
+											"    }",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"challengeId\": \"{{challengeId}}\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/auth/qr-confirm",
+									"host": ["{{base_url}}"],
+									"path": ["auth", "qr-confirm"]
+								},
+								"description": "Desktop confirms QR challenge and receives JWT token"
+							},
+							"response": []
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "SSE - Server-Sent Events",
+			"item": [
+				{
+					"name": "Connect to SSE Stream",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "text/event-stream"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/sse/connect?token={{jwt_token}}",
+							"host": ["{{base_url}}"],
+							"path": ["sse", "connect"],
+							"query": [
+								{
+									"key": "token",
+									"value": "{{jwt_token}}"
+								}
+							]
+						},
+						"description": "Connect to SSE stream for real-time events. Note: Postman may not display SSE properly. Use curl or a browser for testing."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Conversations",
+			"item": [
+				{
+					"name": "List Conversations",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    if (jsonData.conversations && jsonData.conversations.length > 0) {",
+									"        pm.environment.set('conversationId', jsonData.conversations[0].id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/conversations",
+							"host": ["{{base_url}}"],
+							"path": ["conversations"]
+						},
+						"description": "List all conversations for authenticated user"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Conversation (1:1)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201 || pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.environment.set('conversationId', jsonData.conversation.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"memberIds\": [\"{{testUserId}}\"]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/conversations",
+							"host": ["{{base_url}}"],
+							"path": ["conversations"]
+						},
+						"description": "Create a 1:1 conversation with another user"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Group Conversation",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.environment.set('conversationId', jsonData.conversation.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"type\": \"group\",\n  \"title\": \"Team Chat\",\n  \"memberIds\": [\"{{testUserId}}\", \"{{testUserId2}}\"]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/conversations",
+							"host": ["{{base_url}}"],
+							"path": ["conversations"]
+						},
+						"description": "Create a group conversation"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Conversation Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/conversations/{{conversationId}}?limit=20",
+							"host": ["{{base_url}}"],
+							"path": ["conversations", "{{conversationId}}"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								}
+							]
+						},
+						"description": "Get conversation details with last N messages"
+					},
+					"response": []
+				},
+				{
+					"name": "Archive Conversation",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"archived\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/conversations/{{conversationId}}/archive",
+							"host": ["{{base_url}}"],
+							"path": ["conversations", "{{conversationId}}", "archive"]
+						},
+						"description": "Archive or unarchive a conversation"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Messages",
+			"item": [
+				{
+					"name": "Send Message",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.environment.set('messageId', jsonData.message.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"conversationId\": \"{{conversationId}}\",\n  \"text\": \"Hello, this is a test message!\",\n  \"clientId\": \"client-generated-nanoid\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/messages/send",
+							"host": ["{{base_url}}"],
+							"path": ["messages", "send"]
+						},
+						"description": "Send a new message to a conversation"
+					},
+					"response": []
+				},
+				{
+					"name": "Send Message with Attachment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"conversationId\": \"{{conversationId}}\",\n  \"text\": \"Check out this image!\",\n  \"attachments\": [\n    {\n      \"type\": \"image\",\n      \"url\": \"{{attachmentUrl}}\",\n      \"fileName\": \"photo.jpg\",\n      \"fileSize\": 1024000,\n      \"mimeType\": \"image/jpeg\"\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/messages/send",
+							"host": ["{{base_url}}"],
+							"path": ["messages", "send"]
+						},
+						"description": "Send a message with attachment (upload attachment first)"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Messages",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/messages?conversationId={{conversationId}}&limit=20",
+							"host": ["{{base_url}}"],
+							"path": ["messages"],
+							"query": [
+								{
+									"key": "conversationId",
+									"value": "{{conversationId}}"
+								},
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "before",
+									"value": "2024-01-15T10:30:00.000Z",
+									"description": "ISO timestamp for pagination (optional)"
+								}
+							]
+						},
+						"description": "Get paginated messages for a conversation"
+					},
+					"response": []
+				},
+				{
+					"name": "Mark Message as Delivered",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"toUserId\": \"{{testUserId}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/messages/{{messageId}}/delivered",
+							"host": ["{{base_url}}"],
+							"path": ["messages", "{{messageId}}", "delivered"]
+						},
+						"description": "Mark message as delivered to a user"
+					},
+					"response": []
+				},
+				{
+					"name": "Mark Message as Read",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"userId\": \"{{testUserId}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/messages/{{messageId}}/read",
+							"host": ["{{base_url}}"],
+							"path": ["messages", "{{messageId}}", "read"]
+						},
+						"description": "Mark message as read by a user"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Attachments",
+			"item": [
+				{
+					"name": "Upload Attachment",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.environment.set('attachmentUrl', jsonData.url);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": []
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/attachments",
+							"host": ["{{base_url}}"],
+							"path": ["attachments"]
+						},
+						"description": "Upload a file attachment (multipart/form-data)"
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "jwt_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "challengeId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "conversationId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "messageId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "testUserId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "testUserId2",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "attachmentUrl",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "qrPayload",
+			"value": "",
+			"type": "string"
+		}
+	]
+}
+
