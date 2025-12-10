@@ -8,6 +8,7 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 const { getMongoURI } = require('./dbConfig');
+const { generateUserToken } = require('./generateUserToken');
 
 // Import models (using compiled JS files)
 let User, Conversation, Message;
@@ -141,14 +142,24 @@ async function createUsers() {
       let user = await User.findOne({ phone: userData.phone });
       
       if (!user) {
+        const userToken = generateUserToken();
         user = new User({
           ...userData,
+          token: userToken,
           lastSeen: new Date(),
           createdAt: randomDate(30),
         });
         await user.save();
         console.log(`✅ Created user: ${userData.name} (${userData.phone})`);
+        console.log(`   Token: ${userToken}`);
       } else {
+        // Generate token if user doesn't have one
+        if (!user.token) {
+          const userToken = generateUserToken();
+          user.token = userToken;
+          await user.save();
+          console.log(`   Generated token: ${userToken}`);
+        }
         console.log(`⏭️  User already exists: ${userData.name} (${userData.phone})`);
       }
       

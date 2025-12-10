@@ -14,6 +14,7 @@ export interface IUser extends Document {
   phone: string;
   password?: string;
   avatarUrl?: string;
+  token: string; // Unique dedicated token for each user
   activeDevices: IActiveDevice[];
   lastSeen: Date;
   createdAt: Date;
@@ -71,6 +72,12 @@ const UserSchema = new Schema<IUser>(
       type: String,
       default: null,
     },
+    token: {
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+    },
     activeDevices: {
       type: [ActiveDeviceSchema],
       default: [],
@@ -92,6 +99,7 @@ const UserSchema = new Schema<IUser>(
 
 // Indexes
 UserSchema.index({ phone: 1 }, { unique: true });
+UserSchema.index({ token: 1 }, { unique: true });
 UserSchema.index({ lastSeen: -1 });
 
 export const User = mongoose.model<IUser>('User', UserSchema);

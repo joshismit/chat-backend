@@ -5,6 +5,19 @@ import { authenticate } from '../middleware/auth';
 const router = Router();
 
 /**
+ * POST /auth/register
+ * Register/Signup a new user
+ * Creates user with unique token and stores in database
+ */
+router.post('/register', authController.register);
+
+/**
+ * POST /auth/signup
+ * Alias for /auth/register (for compatibility)
+ */
+router.post('/signup', authController.register);
+
+/**
  * POST /auth/send-otp
  * Send OTP to phone number
  */

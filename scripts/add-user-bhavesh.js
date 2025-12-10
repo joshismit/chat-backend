@@ -8,6 +8,7 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 const { getMongoURI } = require('./dbConfig');
+const { generateUserToken } = require('./generateUserToken');
 
 // Import models
 let User, Conversation, Message;
@@ -56,32 +57,52 @@ async function addBhaveshUser() {
     // Get or create current user
     let currentUser = await User.findOne({ phone: CURRENT_USER_PHONE });
     if (!currentUser) {
+      const currentUserToken = generateUserToken();
       currentUser = new User({
         name: 'Demo User',
         phone: CURRENT_USER_PHONE,
         avatarUrl: null,
+        token: currentUserToken,
         lastSeen: new Date(),
         createdAt: new Date(),
       });
       await currentUser.save();
       console.log(`✅ Created current user: ${currentUser.name} (${currentUser.phone})`);
+      console.log(`   Token: ${currentUserToken}`);
     } else {
+      // Generate token if user doesn't have one
+      if (!currentUser.token) {
+        const currentUserToken = generateUserToken();
+        currentUser.token = currentUserToken;
+        await currentUser.save();
+        console.log(`   Generated token: ${currentUserToken}`);
+      }
       console.log(`✅ Found current user: ${currentUser.name} (${currentUser.phone})`);
     }
     
     // Create or get Bhavesh user
     let bhavesh = await User.findOne({ phone: BHAVESH_PHONE });
     if (!bhavesh) {
+      const bhaveshToken = generateUserToken();
       bhavesh = new User({
         name: BHAVESH_NAME,
         phone: BHAVESH_PHONE,
         avatarUrl: null,
+        token: bhaveshToken,
         lastSeen: new Date(),
         createdAt: randomDate(30),
       });
       await bhavesh.save();
       console.log(`✅ Created user: ${bhavesh.name} (${bhavesh.phone})`);
+      console.log(`   Token: ${bhaveshToken}`);
     } else {
+      // Generate token if user doesn't have one
+      if (!bhavesh.token) {
+        const bhaveshToken = generateUserToken();
+        bhavesh.token = bhaveshToken;
+        await bhavesh.save();
+        console.log(`   Generated token: ${bhaveshToken}`);
+      }
       console.log(`⏭️  User already exists: ${bhavesh.name} (${bhavesh.phone})`);
     }
     

@@ -6,6 +6,48 @@ import { messageSyncService } from '../services/messageSyncService';
 
 export class AuthController {
   /**
+   * POST /auth/register
+   * Register/Signup a new user
+   * Creates user with unique token and stores in database
+   */
+  register = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { phone, name, avatarUrl } = req.body;
+
+      if (!phone || !name) {
+        res.status(400).json({ error: 'Phone number and name are required' });
+        return;
+      }
+
+      const result = await authService.registerUser(phone, name, avatarUrl);
+
+      if (!result.success) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+
+      // Return user info (without password) and token
+      const userObj = result.user!.toObject();
+      delete userObj.password;
+
+      res.status(201).json({
+        success: true,
+        message: 'User registered successfully',
+        user: {
+          id: userObj._id.toString(),
+          name: userObj.name,
+          phone: userObj.phone,
+          avatarUrl: userObj.avatarUrl || null,
+          token: result.token,
+        },
+      });
+    } catch (error) {
+      console.error('Error during registration:', error);
+      res.status(500).json({ error: 'Failed to register user' });
+    }
+  };
+
+  /**
    * POST /auth/send-otp
    * Send OTP to phone number
    */

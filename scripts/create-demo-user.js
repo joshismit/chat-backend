@@ -9,6 +9,7 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 require("dotenv").config();
 const { getMongoURI } = require("./dbConfig");
+const { generateUserToken } = require("./generateUserToken");
 
 // Import User model
 let User;
@@ -59,6 +60,14 @@ async function createDemoUser() {
       const hashedPassword = await bcrypt.hash(password, saltRounds);
 
       user.password = hashedPassword;
+      
+      // Generate token if user doesn't have one
+      if (!user.token) {
+        const userToken = generateUserToken();
+        user.token = userToken;
+        console.log(`   Generated token: ${userToken}`);
+      }
+      
       await user.save();
 
       console.log(`✅ Password updated for user: ${user.name} (${user.phone})`);
@@ -69,11 +78,15 @@ async function createDemoUser() {
       const saltRounds = 10;
       const hashedPassword = await bcrypt.hash(password, saltRounds);
 
+      // Generate unique token for user
+      const userToken = generateUserToken();
+      
       user = await User.create({
         name: name,
         phone: phoneNumber,
         password: hashedPassword,
         avatarUrl: null,
+        token: userToken,
       });
 
       console.log(`✅ Created demo user: ${user.name} (${user.phone})`);
@@ -83,6 +96,7 @@ async function createDemoUser() {
     console.log(`   Name: ${user.name}`);
     console.log(`   Phone: ${user.phone}`);
     console.log(`   ID: ${user._id}`);
+    console.log(`   Token: ${user.token}`);
     console.log(`   Password: ${password} (hashed in database)`);
 
     await mongoose.connection.close();

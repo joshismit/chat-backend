@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { QRChallenge, IQRChallenge } from '../models/QRChallenge';
 import { User, IUser } from '../models/User';
 import { RefreshToken, IRefreshToken } from '../models/RefreshToken';
-import { generateQRToken } from '../utils/tokenGenerator';
+import { generateQRToken, generateUserToken } from '../utils/tokenGenerator';
 import {
   signAccessToken,
   signRefreshToken,
@@ -38,6 +38,95 @@ export interface QRStatusResponse {
 export class AuthService {
   // Default OTP for all users (as per requirement)
   private readonly DEFAULT_OTP = 'test123';
+
+  /**
+   * Register/Signup a new user
+   * Creates user with unique token and stores in database
+   */
+  async registerUser(
+    phone: string,
+    name: string,
+    avatarUrl?: string
+  ): Promise<{
+    success: boolean;
+    user?: IUser;
+    token?: string;
+    error?: string;
+  }> {
+    try {
+      const trimmedPhone = phone.trim();
+      const trimmedName = name.trim();
+
+      // Validate inputs
+      if (!trimmedPhone || !trimmedName) {
+        return { success: false, error: 'Phone number and name are required' };
+      }
+
+      // Check if user already exists
+      const existingUser = await User.findOne({ phone: trimmedPhone });
+      if (existingUser) {
+        return { success: false, error: 'User with this phone number already exists' };
+      }
+
+      // Generate unique token
+      let userToken: string;
+      let isUnique = false;
+      let attempts = 0;
+      const maxAttempts = 10;
+
+      // Ensure token is unique
+      while (!isUnique && attempts < maxAttempts) {
+        userToken = generateUserToken();
+        const existingTokenUser = await User.findOne({ token: userToken });
+        if (!existingTokenUser) {
+          isUnique = true;
+        }
+        attempts++;
+      }
+
+      if (!isUnique) {
+        console.error('Failed to generate unique token after', maxAttempts, 'attempts');
+        return { success: false, error: 'Failed to generate user token. Please try again.' };
+      }
+
+      // Create new user with token
+      const newUser = await User.create({
+        name: trimmedName,
+        phone: trimmedPhone,
+        token: userToken!,
+        avatarUrl: avatarUrl || null,
+        activeDevices: [],
+        lastSeen: new Date(),
+        createdAt: new Date(),
+      });
+
+      console.log('User registered successfully:', {
+        id: newUser._id,
+        phone: newUser.phone,
+        name: newUser.name,
+        token: newUser.token,
+      });
+
+      return {
+        success: true,
+        user: newUser,
+        token: newUser.token,
+      };
+    } catch (error: any) {
+      console.error('User registration error:', error);
+      
+      // Handle duplicate key error (phone or token)
+      if (error.code === 11000) {
+        const field = Object.keys(error.keyPattern)[0];
+        return {
+          success: false,
+          error: `${field === 'phone' ? 'Phone number' : 'Token'} already exists`,
+        };
+      }
+
+      return { success: false, error: 'Failed to register user. Please try again.' };
+    }
+  }
 
   /**
    * Send OTP to phone number
@@ -103,6 +192,32 @@ export class AuthService {
       }
 
       console.log('OTP verified successfully');
+
+      // Generate or get user's dedicated token (if user doesn't have one)
+      if (!user.token) {
+        let userToken: string;
+        let isUnique = false;
+        let attempts = 0;
+        const maxAttempts = 10;
+
+        // Ensure token is unique
+        while (!isUnique && attempts < maxAttempts) {
+          userToken = generateUserToken();
+          const existingUser = await User.findOne({ token: userToken });
+          if (!existingUser) {
+            isUnique = true;
+            user.token = userToken;
+            await user.save();
+            console.log('Generated unique user token:', userToken);
+          }
+          attempts++;
+        }
+
+        if (!isUnique) {
+          console.error('Failed to generate unique token after', maxAttempts, 'attempts');
+          return { success: false, error: 'Failed to generate user token. Please try again.' };
+        }
+      }
 
       // Generate tokens
       const accessToken = signAccessToken({ userId: user._id.toString(), phone: user.phone });

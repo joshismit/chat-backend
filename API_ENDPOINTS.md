@@ -4,6 +4,56 @@ Complete list of all backend API endpoints organized by category.
 
 ## Authentication
 
+### POST /auth/register
+**Alias**: `/auth/signup`
+
+Register/Signup a new user. Creates user account with unique dedicated token stored in database.
+
+**Request Body**:
+```json
+{
+  "phone": "1234567890",
+  "name": "John Doe",
+  "avatarUrl": "https://example.com/avatar.jpg"
+}
+```
+
+**Response (201 Created)**:
+```json
+{
+  "success": true,
+  "message": "User registered successfully",
+  "user": {
+    "id": "507f1f77bcf86cd799439011",
+    "name": "John Doe",
+    "phone": "1234567890",
+    "avatarUrl": null,
+    "token": "user_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2"
+  },
+  "token": "user_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2"
+}
+```
+
+**Error Response (400 Bad Request)**:
+```json
+{
+  "error": "Phone number and name are required"
+}
+```
+
+**Error Response (400 Bad Request - Duplicate)**:
+```json
+{
+  "error": "User with this phone number already exists"
+}
+```
+
+**Notes**:
+- Each user gets a unique dedicated token (`user_` prefix + 64 hex characters)
+- Token is automatically generated and stored in database
+- Token is unique and indexed for fast lookups
+- Phone number must be unique
+
 ### POST /auth/login
 **Alias**: `/auth/verify-otp`
 
