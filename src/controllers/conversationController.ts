@@ -1,10 +1,8 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
-import { Conversation, ConversationType, IConversation } from '../models/Conversation';
-import { Message } from '../models/Message';
-import { User } from '../models/User';
+import { ConversationType } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { sendEventToUser } from '../sse';
-import mongoose from 'mongoose';
 
 export interface CreateConversationRequest {
   type?: ConversationType;
@@ -25,24 +23,52 @@ export class ConversationController {
         return;
       }
 
-      const userIdObj = new mongoose.Types.ObjectId(userId);
-
       // Find conversations where user is a member and not archived
-      const conversations = await Conversation.find({
-        members: userIdObj,
-        archivedBy: { $ne: userIdObj }, // Exclude archived conversations
-      })
-        .populate('members', 'name avatarUrl phone')
-        .sort({ lastMessageAt: -1, createdAt: -1 }) // Most recent first
-        .lean();
+      const conversationMembers = await prisma.conversationMember.findMany({
+        where: {
+          userId,
+          conversation: {
+            archivedBy: {
+              none: {
+                userId,
+              },
+            },
+          },
+        },
+        include: {
+          conversation: {
+            include: {
+              members: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      name: true,
+                      avatarUrl: true,
+                      phone: true,
+                    },
+                  },
+                },
+              },
+              archivedBy: true,
+            },
+          },
+        },
+        orderBy: {
+          conversation: {
+            lastMessageAt: 'desc',
+          },
+        },
+      });
 
       // Shape conversation data
-      const formattedConversations = conversations.map((conv) => {
-        const members = (conv.members as any[]).map((member: any) => ({
-          id: member._id.toString(),
-          name: member.name,
-          avatarUrl: member.avatarUrl,
-          phone: member.phone,
+      const formattedConversations = conversationMembers.map((member) => {
+        const conv = member.conversation;
+        const members = conv.members.map((m) => ({
+          id: m.user.id,
+          name: m.user.name,
+          avatarUrl: m.user.avatarUrl,
+          phone: m.user.phone,
         }));
 
         // For 1:1 conversations, get the other member's info
@@ -52,7 +78,7 @@ export class ConversationController {
             : null;
 
         return {
-          id: conv._id.toString(),
+          id: conv.id,
           type: conv.type,
           title:
             conv.type === ConversationType.PRIVATE && otherMember
@@ -111,8 +137,11 @@ export class ConversationController {
       }
 
       // Validate all member IDs exist
-      const memberObjectIds = memberIds.map((id) => new mongoose.Types.ObjectId(id));
-      const users = await User.find({ _id: { $in: memberObjectIds } });
+      const users = await prisma.user.findMany({
+        where: {
+          id: { in: memberIds },
+        },
+      });
       if (users.length !== memberIds.length) {
         res.status(400).json({ error: 'One or more member IDs are invalid' });
         return;
@@ -126,63 +155,100 @@ export class ConversationController {
 
       // For 1:1 conversations, check if conversation already exists
       if (conversationType === ConversationType.PRIVATE) {
-        const existingConv = await Conversation.findOne({
-          type: ConversationType.PRIVATE,
-          members: { $all: [userId, memberIds[0]] },
+        const existingConv = await prisma.conversation.findFirst({
+          where: {
+            type: ConversationType.PRIVATE,
+            members: {
+              every: {
+                userId: { in: [userId, memberIds[0]] },
+              },
+            },
+          },
+          include: {
+            members: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    avatarUrl: true,
+                    phone: true,
+                  },
+                },
+              },
+            },
+          },
         });
 
-        if (existingConv) {
-          // Return existing conversation
-          const populated = await Conversation.findById(existingConv._id)
-            .populate('members', 'name avatarUrl phone')
-            .lean();
+        // Verify it's exactly these two users
+        if (existingConv && existingConv.members.length === 2) {
+          const memberUserIds = existingConv.members.map((m) => m.userId);
+          if (
+            memberUserIds.includes(userId) &&
+            memberUserIds.includes(memberIds[0])
+          ) {
+            // Return existing conversation
+            const members = existingConv.members.map((m) => ({
+              id: m.user.id,
+              name: m.user.name,
+              avatarUrl: m.user.avatarUrl,
+              phone: m.user.phone,
+            }));
 
-          const members = (populated?.members as any[]).map((member: any) => ({
-            id: member._id.toString(),
-            name: member.name,
-            avatarUrl: member.avatarUrl,
-            phone: member.phone,
-          }));
+            const otherMember = members.find((m) => m.id !== userId);
 
-          const otherMember = members.find((m) => m.id !== userId);
-
-          res.json({
-            success: true,
-            conversation: {
-              id: existingConv._id.toString(),
-              type: existingConv.type,
-              title: otherMember?.name || null,
-              members,
-              otherMember: otherMember || null,
-              lastMessageAt: existingConv.lastMessageAt?.toISOString() || null,
-              createdAt: existingConv.createdAt.toISOString(),
-              archived: false,
-            },
-            alreadyExists: true,
-          });
-          return;
+            res.json({
+              success: true,
+              conversation: {
+                id: existingConv.id,
+                type: existingConv.type,
+                title: otherMember?.name || null,
+                members,
+                otherMember: otherMember || null,
+                lastMessageAt: existingConv.lastMessageAt?.toISOString() || null,
+                createdAt: existingConv.createdAt.toISOString(),
+                archived: false,
+              },
+              alreadyExists: true,
+            });
+            return;
+          }
         }
       }
 
       // Create conversation with current user + members
-      const allMembers = [new mongoose.Types.ObjectId(userId), ...memberObjectIds];
-      const conversation = await Conversation.create({
-        type: conversationType,
-        title: conversationType === ConversationType.GROUP ? title : undefined,
-        members: allMembers,
-        archivedBy: [],
+      const allMemberIds = [userId, ...memberIds];
+      const conversation = await prisma.conversation.create({
+        data: {
+          type: conversationType,
+          title: conversationType === ConversationType.GROUP ? title : undefined,
+          members: {
+            create: allMemberIds.map((memberId) => ({
+              userId: memberId,
+            })),
+          },
+        },
+        include: {
+          members: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  avatarUrl: true,
+                  phone: true,
+                },
+              },
+            },
+          },
+        },
       });
 
-      // Populate members
-      const populated = await Conversation.findById(conversation._id)
-        .populate('members', 'name avatarUrl phone')
-        .lean();
-
-      const members = (populated?.members as any[]).map((member: any) => ({
-        id: member._id.toString(),
-        name: member.name,
-        avatarUrl: member.avatarUrl,
-        phone: member.phone,
+      const members = conversation.members.map((m) => ({
+        id: m.user.id,
+        name: m.user.name,
+        avatarUrl: m.user.avatarUrl,
+        phone: m.user.phone,
       }));
 
       const otherMember =
@@ -191,7 +257,7 @@ export class ConversationController {
           : null;
 
       const conversationData = {
-        id: conversation._id.toString(),
+        id: conversation.id,
         type: conversation.type,
         title:
           conversationType === ConversationType.PRIVATE && otherMember
@@ -205,9 +271,9 @@ export class ConversationController {
       };
 
       // Broadcast conversation creation to all members via SSE
-      allMembers.forEach((memberId) => {
-        if (memberId.toString() !== userId) {
-          sendEventToUser(memberId.toString(), 'conversation:new', {
+      allMemberIds.forEach((memberId) => {
+        if (memberId !== userId) {
+          sendEventToUser(memberId, 'conversation:new', {
             conversation: conversationData,
           });
         }
@@ -247,36 +313,51 @@ export class ConversationController {
         return;
       }
 
-      const conversation = await Conversation.findById(id);
+      const conversation = await prisma.conversation.findUnique({
+        where: { id },
+        include: {
+          members: true,
+        },
+      });
       if (!conversation) {
         res.status(404).json({ error: 'Conversation not found' });
         return;
       }
 
       // Check if user is a member
-      const userIdObj = new mongoose.Types.ObjectId(userId);
       const isMember = conversation.members.some(
-        (memberId) => memberId.toString() === userId
+        (member) => member.userId === userId
       );
       if (!isMember) {
         res.status(403).json({ error: 'You are not a member of this conversation' });
         return;
       }
 
-      // Update archivedBy array
+      // Update archivedBy relation
       if (archived) {
-        // Add to archivedBy if not already there
-        if (!conversation.archivedBy.some((id) => id.toString() === userId)) {
-          conversation.archivedBy.push(userIdObj);
-        }
+        // Create archive entry if not exists
+        await prisma.conversationArchive.upsert({
+          where: {
+            conversationId_userId: {
+              conversationId: id,
+              userId,
+            },
+          },
+          create: {
+            conversationId: id,
+            userId,
+          },
+          update: {},
+        });
       } else {
-        // Remove from archivedBy
-        conversation.archivedBy = conversation.archivedBy.filter(
-          (id) => id.toString() !== userId
-        );
+        // Remove archive entry
+        await prisma.conversationArchive.deleteMany({
+          where: {
+            conversationId: id,
+            userId,
+          },
+        });
       }
-
-      await conversation.save();
 
       res.json({
         success: true,
@@ -307,9 +388,24 @@ export class ConversationController {
       const { id } = req.params;
       const messageLimit = Math.min(parseInt(req.query.limit as string || '20', 10), 50); // Max 50 messages
 
-      const conversation = await Conversation.findById(id)
-        .populate('members', 'name avatarUrl phone')
-        .lean();
+      const conversation = await prisma.conversation.findUnique({
+        where: { id },
+        include: {
+          members: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  avatarUrl: true,
+                  phone: true,
+                },
+              },
+            },
+          },
+          archivedBy: true,
+        },
+      });
 
       if (!conversation) {
         res.status(404).json({ error: 'Conversation not found' });
@@ -318,7 +414,7 @@ export class ConversationController {
 
       // Check if user is a member
       const isMember = conversation.members.some(
-        (member: any) => member._id.toString() === userId
+        (member) => member.userId === userId
       );
       if (!isMember) {
         res.status(403).json({ error: 'You are not a member of this conversation' });
@@ -326,39 +422,57 @@ export class ConversationController {
       }
 
       // Get last N messages
-      const messages = await Message.find({
-        conversationId: new mongoose.Types.ObjectId(id),
-      })
-        .populate('senderId', 'name avatarUrl phone')
-        .sort({ createdAt: -1 })
-        .limit(messageLimit)
-        .lean();
+      const messages = await prisma.message.findMany({
+        where: {
+          conversationId: id,
+        },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatarUrl: true,
+              phone: true,
+            },
+          },
+          deliveredTo: {
+            select: { id: true },
+          },
+          readBy: {
+            select: { id: true },
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: messageLimit,
+      });
 
       // Format messages
-      const formattedMessages = messages.map((msg: any) => ({
-        id: msg._id.toString(),
-        conversationId: msg.conversationId.toString(),
-        senderId: msg.senderId._id?.toString() || msg.senderId.toString(),
+      const formattedMessages = messages.map((msg) => ({
+        id: msg.id,
+        conversationId: msg.conversationId || '',
+        senderId: msg.senderId,
         sender: {
-          id: msg.senderId._id?.toString() || msg.senderId.toString(),
-          name: msg.senderId.name,
-          avatarUrl: msg.senderId.avatarUrl,
+          id: msg.sender.id,
+          name: msg.sender.name,
+          avatarUrl: msg.sender.avatarUrl,
         },
-        text: msg.text,
-        attachments: msg.attachments || [],
+        text: msg.content,
+        attachments: (msg.attachments as any[]) || [],
         clientId: msg.clientId,
         status: msg.status,
         createdAt: msg.createdAt.toISOString(),
-        deliveredTo: msg.deliveredTo.map((id: any) => id.toString()),
-        readBy: msg.readBy.map((id: any) => id.toString()),
+        deliveredTo: msg.deliveredTo.map((u) => u.id),
+        readBy: msg.readBy.map((u) => u.id),
       }));
 
       // Format members
-      const members = (conversation.members as any[]).map((member: any) => ({
-        id: member._id.toString(),
-        name: member.name,
-        avatarUrl: member.avatarUrl,
-        phone: member.phone,
+      const members = conversation.members.map((m) => ({
+        id: m.user.id,
+        name: m.user.name,
+        avatarUrl: m.user.avatarUrl,
+        phone: m.user.phone,
       }));
 
       const otherMember =
@@ -366,15 +480,14 @@ export class ConversationController {
           ? members.find((m) => m.id !== userId)
           : null;
 
-      const userIdObj = new mongoose.Types.ObjectId(userId);
       const isArchived = conversation.archivedBy.some(
-        (id: any) => id.toString() === userId
+        (archive) => archive.userId === userId
       );
 
       res.json({
         success: true,
         conversation: {
-          id: conversation._id.toString(),
+          id: conversation.id,
           type: conversation.type,
           title:
             conversation.type === ConversationType.PRIVATE && otherMember
@@ -400,4 +513,3 @@ export class ConversationController {
 }
 
 export const conversationController = new ConversationController();
-

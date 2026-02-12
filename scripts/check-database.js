@@ -1,79 +1,85 @@
 /**
  * Database Check Script
- * Verifies MongoDB connection and lists collections
+ * Verifies PostgreSQL connection via Prisma and lists tables
  * 
  * Usage: node scripts/check-database.js
  */
 
-const mongoose = require('mongoose');
 require('dotenv').config();
-const { getMongoURI } = require('./dbConfig');
+const { PrismaClient } = require('@prisma/client');
 
-// Get MongoDB URI from environment variables
-const finalURI = getMongoURI();
+const prisma = new PrismaClient();
 
 async function checkDatabase() {
   try {
-    console.log('🔍 Connecting to MongoDB...');
-    console.log(`📍 URI: ${finalURI.replace(/:[^:@]+@/, ':****@')}`); // Hide password
-    
-    await mongoose.connect(finalURI, {
-      maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
-    });
-
-    const db = mongoose.connection.db;
-    const dbName = db.databaseName;
-    
-    console.log('\n✅ Successfully connected to MongoDB!');
-    console.log(`📦 Database Name: ${dbName}`);
-    console.log(`🔗 Connection State: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'}`);
-    
-    // List all collections
-    console.log('\n📚 Checking collections...');
-    const collections = await db.listCollections().toArray();
-    
-    if (collections.length === 0) {
-      console.log('⚠️  No collections found in database.');
-      console.log('💡 Collections will be created automatically when first document is saved.');
-      console.log('\nExpected collections:');
-      console.log('  - users');
-      console.log('  - messages');
-      console.log('  - conversations');
-      console.log('  - qrchallenges');
-    } else {
-      console.log(`\n✅ Found ${collections.length} collection(s):`);
-      for (const collection of collections) {
-        const count = await db.collection(collection.name).countDocuments();
-        console.log(`  📄 ${collection.name}: ${count} document(s)`);
-        
-        // Show indexes
-        const indexes = await db.collection(collection.name).indexes();
-        if (indexes.length > 1) { // More than just _id index
-          console.log(`     Indexes: ${indexes.map(idx => idx.name).join(', ')}`);
-        }
-      }
+    console.log('🔍 Connecting to PostgreSQL...');
+    const dbUrl = process.env.DATABASE_URL;
+    if (dbUrl) {
+      // Hide password in URL
+      const hiddenUrl = dbUrl.replace(/:[^:@]+@/, ':****@');
+      console.log(`📍 URL: ${hiddenUrl}`);
     }
     
-    // Check expected collections
-    const expectedCollections = ['users', 'messages', 'conversations', 'qrchallenges'];
-    const existingCollections = collections.map(c => c.name);
-    const missingCollections = expectedCollections.filter(name => !existingCollections.includes(name));
-    
-    if (missingCollections.length > 0) {
-      console.log(`\n⚠️  Missing collections: ${missingCollections.join(', ')}`);
-      console.log('💡 These will be created automatically when models are used.');
-    } else {
-      console.log('\n✅ All expected collections exist!');
-    }
+    // Test connection
+    await prisma.$connect();
+    console.log('\n✅ Successfully connected to PostgreSQL!');
     
     // Test database operations
     console.log('\n🧪 Testing database operations...');
-    const testResult = await db.admin().ping();
-    console.log(`✅ Database ping: ${JSON.stringify(testResult)}`);
+    await prisma.$queryRaw`SELECT 1`;
+    console.log('✅ Database ping successful');
     
-    await mongoose.connection.close();
+    // List tables
+    console.log('\n📚 Checking tables...');
+    const tables = await prisma.$queryRaw`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public'
+      ORDER BY table_name;
+    `;
+    
+    if (tables.length === 0) {
+      console.log('⚠️  No tables found in database.');
+      console.log('💡 Tables will be created when you run: npx prisma migrate dev');
+      console.log('\nExpected tables:');
+      console.log('  - users');
+      console.log('  - messages');
+      console.log('  - conversations');
+      console.log('  - conversation_members');
+      console.log('  - conversation_archives');
+      console.log('  - qr_challenges');
+      console.log('  - refresh_tokens');
+    } else {
+      console.log(`\n✅ Found ${tables.length} table(s):`);
+      for (const table of tables) {
+        const count = await prisma.$queryRawUnsafe(
+          `SELECT COUNT(*) as count FROM "${table.table_name}"`
+        );
+        console.log(`  📄 ${table.table_name}: ${count[0].count} row(s)`);
+      }
+    }
+    
+    // Check expected tables
+    const expectedTables = [
+      'users',
+      'messages',
+      'conversations',
+      'conversation_members',
+      'conversation_archives',
+      'qr_challenges',
+      'refresh_tokens',
+    ];
+    const existingTables = tables.map(t => t.table_name);
+    const missingTables = expectedTables.filter(name => !existingTables.includes(name));
+    
+    if (missingTables.length > 0) {
+      console.log(`\n⚠️  Missing tables: ${missingTables.join(', ')}`);
+      console.log('💡 Run: npx prisma migrate dev to create them.');
+    } else {
+      console.log('\n✅ All expected tables exist!');
+    }
+    
+    await prisma.$disconnect();
     console.log('\n✅ Database check completed successfully!');
     process.exit(0);
     
@@ -82,16 +88,18 @@ async function checkDatabase() {
     console.error('Error:', error.message);
     
     if (error.message.includes('authentication failed')) {
-      console.error('\n💡 Tip: Check your MongoDB credentials in MONGO_URI');
+      console.error('\n💡 Tip: Check your PostgreSQL credentials in DATABASE_URL');
     } else if (error.message.includes('ENOTFOUND') || error.message.includes('getaddrinfo')) {
-      console.error('\n💡 Tip: Check your network connection and MongoDB cluster URL');
+      console.error('\n💡 Tip: Check your network connection and PostgreSQL server URL');
     } else if (error.message.includes('timeout')) {
-      console.error('\n💡 Tip: Check if MongoDB Atlas allows connections from your IP address');
+      console.error('\n💡 Tip: Check if PostgreSQL server allows connections from your IP address');
+    } else if (error.message.includes('relation') && error.message.includes('does not exist')) {
+      console.error('\n💡 Tip: Run migrations: npx prisma migrate dev');
     }
     
+    await prisma.$disconnect().catch(() => {});
     process.exit(1);
   }
 }
 
 checkDatabase();
-

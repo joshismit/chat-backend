@@ -27,17 +27,16 @@ export class AuthController {
       }
 
       // Return user info (without password) and token
-      const userObj = result.user!.toObject();
-      delete userObj.password;
+      const user = result.user!;
 
       res.status(201).json({
         success: true,
         message: 'User registered successfully',
         user: {
-          id: userObj._id.toString(),
-          name: userObj.name,
-          phone: userObj.phone,
-          avatarUrl: userObj.avatarUrl || null,
+          id: user.id,
+          name: user.name,
+          phone: user.phone,
+          avatarUrl: user.avatarUrl || null,
           token: result.token,
         },
       });
@@ -99,18 +98,17 @@ export class AuthController {
       }
 
       // Return user info (without password)
-      const userObj = result.user!.toObject();
-      delete userObj.password;
+      const user = result.user!;
 
       res.json({
         success: true,
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
         user: {
-          id: userObj._id.toString(),
-          name: userObj.name,
-          phone: userObj.phone,
-          avatarUrl: userObj.avatarUrl || null,
+          id: user.id,
+          name: user.name,
+          phone: user.phone,
+          avatarUrl: user.avatarUrl || null,
         },
       });
     } catch (error) {
@@ -291,18 +289,17 @@ export class AuthController {
       }
 
       // Return user info (without password)
-      const userObj = result.user!.toObject();
-      delete userObj.password;
+      const user = result.user!;
 
       res.json({
         success: true,
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
         user: {
-          id: userObj._id.toString(),
-          name: userObj.name,
-          phone: userObj.phone,
-          avatarUrl: userObj.avatarUrl || null,
+          id: user.id,
+          name: user.name,
+          phone: user.phone,
+          avatarUrl: user.avatarUrl || null,
         },
       });
     } catch (error) {
@@ -368,7 +365,7 @@ export class AuthController {
 
       // Format users (exclude password)
       const formattedUsers = result.users!.map((user) => ({
-        id: user._id.toString(),
+        id: user.id,
         name: user.name,
         phone: user.phone,
         avatarUrl: user.avatarUrl || null,

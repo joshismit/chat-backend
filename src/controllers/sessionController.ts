@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
-import { RefreshToken } from '../models/RefreshToken';
-import mongoose from 'mongoose';
+import { prisma } from '../utils/prisma';
 
 export class SessionController {
   /**
@@ -17,36 +16,30 @@ export class SessionController {
         return;
       }
 
-      const userIdObj = new mongoose.Types.ObjectId(userId);
-
-      // Get current session token from request (if available)
-      const authHeader = req.headers.authorization;
-      let currentTokenId: string | null = null;
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        try {
-          const token = authHeader.substring(7);
-          const { RefreshToken: RefreshTokenModel } = await import('../models/RefreshToken');
-          // Try to find session by matching access token or refresh token
-          // Note: In a real implementation, you'd decode JWT to get session ID
-          // For now, we'll mark sessions based on lastUsedAt (most recent = current)
-        } catch (error) {
-          // Ignore token parsing errors
-        }
-      }
-
       // Get all active sessions (not expired)
-      const sessions = await RefreshToken.find({
-        userId: userIdObj,
-        expiresAt: { $gt: new Date() },
-      })
-        .select('_id deviceType deviceId userAgent ipAddress lastUsedAt createdAt')
-        .sort({ lastUsedAt: -1 })
-        .lean();
+      const sessions = await prisma.refreshToken.findMany({
+        where: {
+          userId,
+          expiresAt: { gt: new Date() },
+        },
+        select: {
+          id: true,
+          deviceType: true,
+          deviceId: true,
+          userAgent: true,
+          ipAddress: true,
+          lastUsedAt: true,
+          createdAt: true,
+        },
+        orderBy: {
+          lastUsedAt: 'desc',
+        },
+      });
 
       // Format sessions
       // Mark most recently used session as current (if multiple sessions exist)
       const formattedSessions = sessions.map((session, index) => ({
-        id: session._id.toString(),
+        id: session.id,
         deviceType: session.deviceType,
         deviceId: session.deviceId || 'Unknown',
         userAgent: session.userAgent || 'Unknown',
@@ -87,13 +80,12 @@ export class SessionController {
         return;
       }
 
-      const userIdObj = new mongoose.Types.ObjectId(userId);
-      const sessionIdObj = new mongoose.Types.ObjectId(sessionId);
-
       // Find and verify session belongs to user
-      const session = await RefreshToken.findOne({
-        _id: sessionIdObj,
-        userId: userIdObj,
+      const session = await prisma.refreshToken.findFirst({
+        where: {
+          id: sessionId,
+          userId,
+        },
       });
 
       if (!session) {
@@ -102,7 +94,9 @@ export class SessionController {
       }
 
       // Delete session
-      await RefreshToken.deleteOne({ _id: sessionIdObj });
+      await prisma.refreshToken.delete({
+        where: { id: sessionId },
+      });
 
       res.json({
         success: true,
@@ -116,4 +110,3 @@ export class SessionController {
 }
 
 export const sessionController = new SessionController();
-

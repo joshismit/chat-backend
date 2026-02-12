@@ -1,9 +1,8 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
-import { Message, MessageStatus, IMessage } from '../models/Message';
-import { Conversation } from '../models/Conversation';
+import { MessageStatus } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 import { sendEventToUser } from '../sse';
-import mongoose from 'mongoose';
 
 export interface SendMessageRequest {
   conversationId: string;
@@ -51,15 +50,23 @@ export class MessageController {
       }
 
       // Validate conversation exists and user is a member
-      const conversation = await Conversation.findById(conversationId);
+      const conversation = await prisma.conversation.findUnique({
+        where: { id: conversationId },
+        include: {
+          members: {
+            include: {
+              user: true,
+            },
+          },
+        },
+      });
       if (!conversation) {
         res.status(404).json({ error: 'Conversation not found' });
         return;
       }
 
-      const userIdObj = new mongoose.Types.ObjectId(userId);
       const isMember = conversation.members.some(
-        (memberId) => memberId.toString() === userId
+        (member) => member.userId === userId
       );
       if (!isMember) {
         res.status(403).json({ error: 'You are not a member of this conversation' });
@@ -79,43 +86,51 @@ export class MessageController {
       }
 
       // Determine receiverId from conversation members (exclude sender)
-      const receiverIdObj = conversation.members.find(
-        (memberId) => memberId.toString() !== userId
+      const receiverMember = conversation.members.find(
+        (member) => member.userId !== userId
       ) || conversation.members[0]; // Fallback to first member if only one member
+      const receiverId = receiverMember?.userId || userId;
 
       // Create message
-      const message = await Message.create({
-        conversationId: new mongoose.Types.ObjectId(conversationId),
-        senderId: userIdObj,
-        receiverId: receiverIdObj,
-        content: text?.trim() || (attachments && attachments.length > 0 ? '' : ''),
-        type: attachments && attachments.length > 0 ? 'image' : 'text',
-        attachments: attachments || [],
-        clientId: clientId || undefined,
-        status: MessageStatus.SENT,
-        timestamp: new Date(),
-        deliveredTo: [],
-        readBy: [],
+      const message = await prisma.message.create({
+        data: {
+          conversationId: conversationId,
+          senderId: userId,
+          receiverId: receiverId,
+          content: text?.trim() || (attachments && attachments.length > 0 ? '' : ''),
+          type: attachments && attachments.length > 0 ? 'IMAGE' : 'TEXT',
+          attachments: attachments || [],
+          clientId: clientId || undefined,
+          status: MessageStatus.SENT,
+          timestamp: new Date(),
+          createdAt: new Date(),
+        },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatarUrl: true,
+            },
+          },
+        },
       });
 
       // Update conversation's lastMessageAt
-      conversation.lastMessageAt = new Date();
-      await conversation.save();
-
-      // Populate sender info for SSE event
-      const populatedMessage = await Message.findById(message._id)
-        .populate('senderId', 'name avatarUrl')
-        .lean();
+      await prisma.conversation.update({
+        where: { id: conversationId },
+        data: { lastMessageAt: new Date() },
+      });
 
       // Prepare message payload for SSE (exclude sender from recipients)
       const messagePayload = {
-        id: message._id.toString(),
+        id: message.id,
         conversationId: conversationId,
         senderId: userId,
-        sender: populatedMessage?.senderId,
+        sender: message.sender,
         text: message.content,
         content: message.content,
-        attachments: message.attachments || [],
+        attachments: (message.attachments as any[]) || [],
         clientId: message.clientId,
         status: message.status,
         createdAt: message.createdAt.toISOString(),
@@ -123,8 +138,8 @@ export class MessageController {
 
       // Broadcast to all conversation members except sender via SSE
       const recipientIds = conversation.members
-        .filter((memberId) => memberId.toString() !== userId)
-        .map((memberId) => memberId.toString());
+        .filter((member) => member.userId !== userId)
+        .map((member) => member.userId);
 
       // Send to each recipient individually (excluding sender)
       recipientIds.forEach((recipientId) => {
@@ -133,24 +148,21 @@ export class MessageController {
         });
       });
 
-      // Also send delivery confirmation to sender (optional)
-      // This can be handled client-side, but we can send it here too
-
       res.status(201).json({
         success: true,
         message: {
-          id: message._id.toString(),
-          conversationId: message.conversationId?.toString() || conversationId,
-          senderId: message.senderId.toString(),
-          receiverId: message.receiverId.toString(),
+          id: message.id,
+          conversationId: message.conversationId || conversationId,
+          senderId: message.senderId,
+          receiverId: message.receiverId,
           text: message.content,
           content: message.content,
-          attachments: message.attachments || [],
+          attachments: (message.attachments as any[]) || [],
           clientId: message.clientId,
           status: message.status,
           createdAt: message.createdAt.toISOString(),
-          deliveredTo: (message.deliveredTo || []).map((id) => id.toString()),
-          readBy: (message.readBy || []).map((id) => id.toString()),
+          deliveredTo: [],
+          readBy: [],
         },
       });
     } catch (error: any) {
@@ -183,14 +195,19 @@ export class MessageController {
       }
 
       // Validate conversation exists and user is a member
-      const conversation = await Conversation.findById(conversationId);
+      const conversation = await prisma.conversation.findUnique({
+        where: { id: conversationId },
+        include: {
+          members: true,
+        },
+      });
       if (!conversation) {
         res.status(404).json({ error: 'Conversation not found' });
         return;
       }
 
       const isMember = conversation.members.some(
-        (memberId) => memberId.toString() === userId
+        (member) => member.userId === userId
       );
       if (!isMember) {
         res.status(403).json({ error: 'You are not a member of this conversation' });
@@ -207,38 +224,57 @@ export class MessageController {
         return;
       }
 
-      // Build query
-      const query: any = {
-        conversationId: new mongoose.Types.ObjectId(conversationId),
-        createdAt: { $lt: beforeDate },
-      };
-
       // Fetch messages (ordered descending by createdAt)
-      const messages = await Message.find(query)
-        .populate('senderId', 'name avatarUrl phone')
-        .sort({ createdAt: -1 })
-        .limit(limitNum)
-        .lean();
+      const messages = await prisma.message.findMany({
+        where: {
+          conversationId: conversationId,
+          createdAt: { lt: beforeDate },
+        },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatarUrl: true,
+              phone: true,
+            },
+          },
+          deliveredTo: {
+            select: {
+              id: true,
+            },
+          },
+          readBy: {
+            select: {
+              id: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: limitNum,
+      });
 
       // Format response
       const formattedMessages = messages.map((msg) => ({
-        id: msg._id.toString(),
-        conversationId: msg.conversationId?.toString() || '',
-        senderId: msg.senderId._id?.toString() || msg.senderId.toString(),
-        receiverId: msg.receiverId?.toString() || '',
+        id: msg.id,
+        conversationId: msg.conversationId || '',
+        senderId: msg.senderId,
+        receiverId: msg.receiverId,
         sender: {
-          id: msg.senderId._id?.toString() || msg.senderId.toString(),
-          name: (msg.senderId as any).name,
-          avatarUrl: (msg.senderId as any).avatarUrl,
+          id: msg.sender.id,
+          name: msg.sender.name,
+          avatarUrl: msg.sender.avatarUrl,
         },
         text: msg.content,
         content: msg.content,
-        attachments: msg.attachments || [],
+        attachments: (msg.attachments as any[]) || [],
         clientId: msg.clientId,
         status: msg.status,
         createdAt: msg.createdAt.toISOString(),
-        deliveredTo: (msg.deliveredTo || []).map((id: any) => id.toString()),
-        readBy: (msg.readBy || []).map((id: any) => id.toString()),
+        deliveredTo: msg.deliveredTo.map((user) => user.id),
+        readBy: msg.readBy.map((user) => user.id),
       }));
 
       // Determine if there are more messages
@@ -282,18 +318,27 @@ export class MessageController {
       const { toUserId } = req.body; // Optional: specify user, defaults to authenticated user
 
       const targetUserId = toUserId || userId;
-      const targetUserIdObj = new mongoose.Types.ObjectId(targetUserId);
 
       // Find message
-      const message = await Message.findById(id);
+      const message = await prisma.message.findUnique({
+        where: { id },
+        include: {
+          deliveredTo: true,
+          conversation: {
+            include: {
+              members: true,
+            },
+          },
+        },
+      });
       if (!message) {
         res.status(404).json({ error: 'Message not found' });
         return;
       }
 
       // Check if already delivered to this user
-      const alreadyDelivered = (message.deliveredTo || []).some(
-        (id) => id.toString() === targetUserId
+      const alreadyDelivered = message.deliveredTo.some(
+        (user) => user.id === targetUserId
       );
 
       if (alreadyDelivered) {
@@ -305,32 +350,42 @@ export class MessageController {
         return;
       }
 
-      // Initialize deliveredTo array if undefined
-      if (!message.deliveredTo) {
-        message.deliveredTo = [];
-      }
-      
-      // Add to deliveredTo array
-      message.deliveredTo.push(targetUserIdObj);
-      
+      // Connect user to deliveredTo relation
+      await prisma.message.update({
+        where: { id },
+        data: {
+          deliveredTo: {
+            connect: { id: targetUserId },
+          },
+        },
+      });
+
       // Update message status if all recipients have received it
-      if (message.conversationId) {
-        const conversation = await Conversation.findById(message.conversationId).select('members');
-        if (conversation) {
-          const recipientCount = conversation.members.filter(
-            (memberId) => memberId.toString() !== message.senderId.toString()
-          ).length;
-          
-          if (message.deliveredTo.length >= recipientCount) {
-            message.status = MessageStatus.DELIVERED;
-          }
+      let updatedStatus = message.status;
+      if (message.conversationId && message.conversation) {
+        const recipientCount = message.conversation.members.filter(
+          (member) => member.userId !== message.senderId
+        ).length;
+        
+        // Get updated message to check deliveredTo count
+        const updatedMessage = await prisma.message.findUnique({
+          where: { id },
+          include: {
+            deliveredTo: true,
+          },
+        });
+        
+        if (updatedMessage && updatedMessage.deliveredTo.length >= recipientCount) {
+          updatedStatus = MessageStatus.DELIVERED;
+          await prisma.message.update({
+            where: { id },
+            data: { status: MessageStatus.DELIVERED },
+          });
         }
       }
 
-      await message.save();
-
       // Emit SSE event to message sender
-      const senderId = message.senderId.toString();
+      const senderId = message.senderId;
       sendEventToUser(senderId, 'message:status', {
         messageId: id,
         status: 'delivered',
@@ -338,11 +393,21 @@ export class MessageController {
         timestamp: new Date().toISOString(),
       });
 
+      // Get final message state
+      const finalMessage = await prisma.message.findUnique({
+        where: { id },
+        include: {
+          deliveredTo: {
+            select: { id: true },
+          },
+        },
+      });
+
       res.json({
         success: true,
         messageId: id,
-        deliveredTo: (message.deliveredTo || []).map((id) => id.toString()),
-        status: message.status,
+        deliveredTo: finalMessage?.deliveredTo.map((u) => u.id) || [],
+        status: updatedStatus,
       });
     } catch (error: any) {
       console.error('Error marking message as delivered:', error);
@@ -369,17 +434,27 @@ export class MessageController {
       const { userId: readByUserId } = req.body; // Optional: specify user, defaults to authenticated user
 
       const targetUserId = readByUserId || userId;
-      const targetUserIdObj = new mongoose.Types.ObjectId(targetUserId);
 
       // Find message
-      const message = await Message.findById(id);
+      const message = await prisma.message.findUnique({
+        where: { id },
+        include: {
+          deliveredTo: true,
+          readBy: true,
+          conversation: {
+            include: {
+              members: true,
+            },
+          },
+        },
+      });
       if (!message) {
         res.status(404).json({ error: 'Message not found' });
         return;
       }
 
       // Check if already read by this user
-      const alreadyRead = (message.readBy || []).some((id) => id.toString() === targetUserId);
+      const alreadyRead = message.readBy.some((user) => user.id === targetUserId);
 
       if (alreadyRead) {
         res.json({
@@ -390,45 +465,60 @@ export class MessageController {
         return;
       }
 
-      // Initialize arrays if undefined
-      if (!message.deliveredTo) {
-        message.deliveredTo = [];
-      }
-      if (!message.readBy) {
-        message.readBy = [];
-      }
-
       // Ensure user has received the message first (add to deliveredTo if not present)
       const isDelivered = message.deliveredTo.some(
-        (id) => id.toString() === targetUserId
+        (user) => user.id === targetUserId
       );
+      
+      const updateData: any = {
+        readBy: {
+          connect: { id: targetUserId },
+        },
+      };
+      
       if (!isDelivered) {
-        message.deliveredTo.push(targetUserIdObj);
+        updateData.deliveredTo = {
+          connect: { id: targetUserId },
+        };
       }
 
-      // Add to readBy array
-      message.readBy.push(targetUserIdObj);
+      await prisma.message.update({
+        where: { id },
+        data: updateData,
+      });
 
       // Update message status if all recipients have read it
-      if (message.conversationId) {
-        const conversation = await Conversation.findById(message.conversationId).select('members');
-        if (conversation) {
-          const recipientCount = conversation.members.filter(
-            (memberId) => memberId.toString() !== message.senderId.toString()
-          ).length;
+      let updatedStatus = message.status;
+      if (message.conversationId && message.conversation) {
+        const recipientCount = message.conversation.members.filter(
+          (member) => member.userId !== message.senderId
+        ).length;
 
-          if (message.readBy.length >= recipientCount) {
-            message.status = MessageStatus.READ;
-          } else if (message.status !== MessageStatus.READ) {
-            message.status = MessageStatus.DELIVERED;
-          }
+        // Get updated message to check readBy count
+        const updatedMessage = await prisma.message.findUnique({
+          where: { id },
+          include: {
+            readBy: true,
+          },
+        });
+
+        if (updatedMessage && updatedMessage.readBy.length >= recipientCount) {
+          updatedStatus = MessageStatus.READ;
+          await prisma.message.update({
+            where: { id },
+            data: { status: MessageStatus.READ },
+          });
+        } else if (updatedStatus !== MessageStatus.READ) {
+          updatedStatus = MessageStatus.DELIVERED;
+          await prisma.message.update({
+            where: { id },
+            data: { status: MessageStatus.DELIVERED },
+          });
         }
       }
 
-      await message.save();
-
       // Emit SSE event to message sender
-      const senderId = message.senderId.toString();
+      const senderId = message.senderId;
       sendEventToUser(senderId, 'message:status', {
         messageId: id,
         status: 'read',
@@ -436,12 +526,25 @@ export class MessageController {
         timestamp: new Date().toISOString(),
       });
 
+      // Get final message state
+      const finalMessage = await prisma.message.findUnique({
+        where: { id },
+        include: {
+          deliveredTo: {
+            select: { id: true },
+          },
+          readBy: {
+            select: { id: true },
+          },
+        },
+      });
+
       res.json({
         success: true,
         messageId: id,
-        readBy: (message.readBy || []).map((id) => id.toString()),
-        deliveredTo: (message.deliveredTo || []).map((id) => id.toString()),
-        status: message.status,
+        readBy: finalMessage?.readBy.map((u) => u.id) || [],
+        deliveredTo: finalMessage?.deliveredTo.map((u) => u.id) || [],
+        status: updatedStatus,
       });
     } catch (error: any) {
       console.error('Error marking message as read:', error);
@@ -454,4 +557,3 @@ export class MessageController {
 }
 
 export const messageController = new MessageController();
-

@@ -1,17 +1,17 @@
 import express, { Express, Request, Response } from 'express';
-import mongoose from 'mongoose';
 import cors from 'cors';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
-import { getMongoURI } from './utils/dbConfig';
+import { getDatabaseUrl } from './utils/dbConfig';
+import { prisma } from './utils/prisma';
 
 dotenv.config();
 
 const app: Express = express();
 // PORT from environment variable or default to 3000
 const PORT = parseInt(process.env.PORT || '3000', 10);
-// MongoDB connection - uses MONGO_URI from environment variables
-const MONGO_URI = getMongoURI();
+// PostgreSQL connection - uses DATABASE_URL from environment variables
+const DATABASE_URL = getDatabaseUrl();
 
 // Middleware
 // CORS configuration - allow all origins in development, specific origins in production
@@ -69,31 +69,16 @@ app.use('/conversations', conversationRoutes);
 app.use('/attachments', attachmentRoutes);
 // app.use('/api/chat', chatRoutes);
 
-// Connect to MongoDB
-mongoose
-  .connect(MONGO_URI, {
-    maxPoolSize: 10,
-    serverSelectionTimeoutMS: 5000,
-    socketTimeoutMS: 45000,
-  })
-  .then(() => {
-    const dbName = mongoose.connection.db?.databaseName || 'unknown';
-    console.log(`✅ Connected to MongoDB`);
-    console.log(`📦 Database: ${dbName}`);
-    console.log(`🔗 Connection state: ${mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'}`);
+// Connect to PostgreSQL via Prisma
+async function connectDatabase() {
+  try {
+    // Test database connection
+    await prisma.$connect();
+    console.log(`✅ Connected to PostgreSQL`);
     
-    // List collections to verify database setup
-    mongoose.connection.db?.listCollections().toArray()
-      .then((collections) => {
-        if (collections.length > 0) {
-          console.log(`📚 Collections found: ${collections.map(c => c.name).join(', ')}`);
-        } else {
-          console.log(`⚠️  No collections found. Database will be created when first document is saved.`);
-        }
-      })
-      .catch((err) => {
-        console.warn('⚠️  Could not list collections:', err.message);
-      });
+    // Verify connection by running a simple query
+    await prisma.$queryRaw`SELECT 1`;
+    console.log(`🔗 Database connection verified`);
     
     // Start server
     // Listen on all interfaces (0.0.0.0) to accept connections from network
@@ -105,21 +90,23 @@ mongoose
         console.log(`📱 For Android emulator, use: http://10.0.2.2:${PORT}`);
       }
     });
-  })
-  .catch((error) => {
-    console.error('❌ MongoDB connection error:', error);
+  } catch (error) {
+    console.error('❌ PostgreSQL connection error:', error);
     process.exit(1);
-  });
+  }
+}
+
+connectDatabase();
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, closing MongoDB connection...');
+  console.log('SIGTERM received, closing database connection...');
   try {
-    await mongoose.connection.close();
-    console.log('MongoDB connection closed');
+    await prisma.$disconnect();
+    console.log('Database connection closed');
     process.exit(0);
   } catch (error) {
-    console.error('Error closing MongoDB connection:', error);
+    console.error('Error closing database connection:', error);
     process.exit(1);
   }
 });

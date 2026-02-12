@@ -8,8 +8,14 @@ WORKDIR /app
 COPY package*.json ./
 COPY tsconfig.json ./
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+# Install dependencies (including dev dependencies for Prisma)
+RUN npm ci && npm cache clean --force
+
+# Copy Prisma schema
+COPY prisma ./prisma
+
+# Generate Prisma Client
+RUN npx prisma generate
 
 # Copy source code
 COPY src ./src
@@ -30,8 +36,14 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
+# Copy Prisma schema
+COPY prisma ./prisma
+
 # Install only production dependencies
 RUN npm ci --only=production && npm cache clean --force
+
+# Generate Prisma Client (production)
+RUN npx prisma generate
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist

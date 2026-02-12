@@ -5,39 +5,33 @@
  * Usage: node scripts/create-test-data.js
  */
 
-const mongoose = require('mongoose');
 require('dotenv').config();
-const { getMongoURI } = require('./dbConfig');
+const { PrismaClient } = require('@prisma/client');
+const { generateUserToken } = require('../dist/utils/tokenGenerator').generateUserToken || require('../src/utils/tokenGenerator').generateUserToken;
 
-// Import models
-const User = require('../dist/models/User').User || require('../src/models/User').User;
-const Conversation = require('../dist/models/Conversation').Conversation || require('../src/models/Conversation').Conversation;
-const Message = require('../dist/models/Message').Message || require('../src/models/Message').Message;
-
-// Get MongoDB URI from environment variables
-const MONGO_URI = getMongoURI();
+const prisma = new PrismaClient();
 
 async function createTestData() {
   try {
-    console.log('🔍 Connecting to MongoDB...');
-    await mongoose.connect(MONGO_URI);
-    console.log('✅ Connected to MongoDB');
-
-    // Clear existing test data (optional - comment out to keep existing data)
-    // await User.deleteMany({ phone: { $in: ['+1234567890', '+0987654321'] } });
-    // await Conversation.deleteMany({});
-    // await Message.deleteMany({});
+    console.log('🔍 Connecting to PostgreSQL...');
+    await prisma.$connect();
+    console.log('✅ Connected to PostgreSQL');
 
     // Create test users
     console.log('\n👤 Creating test users...');
-    let user1 = await User.findOne({ phone: '+1234567890' });
-    let user2 = await User.findOne({ phone: '+0987654321' });
+    let user1 = await prisma.user.findUnique({ where: { phone: '+1234567890' } });
+    let user2 = await prisma.user.findUnique({ where: { phone: '+0987654321' } });
 
     if (!user1) {
-      user1 = await User.create({
-        name: 'Alice',
-        phone: '+1234567890',
-        avatarUrl: null,
+      user1 = await prisma.user.create({
+        data: {
+          name: 'Alice',
+          phone: '+1234567890',
+          avatarUrl: null,
+          token: generateUserToken(),
+          activeDevices: [],
+          lastSeen: new Date(),
+        },
       });
       console.log(`✅ Created user: ${user1.name} (${user1.phone})`);
     } else {
@@ -45,10 +39,15 @@ async function createTestData() {
     }
 
     if (!user2) {
-      user2 = await User.create({
-        name: 'Bob',
-        phone: '+0987654321',
-        avatarUrl: null,
+      user2 = await prisma.user.create({
+        data: {
+          name: 'Bob',
+          phone: '+0987654321',
+          avatarUrl: null,
+          token: generateUserToken(),
+          activeDevices: [],
+          lastSeen: new Date(),
+        },
       });
       console.log(`✅ Created user: ${user2.name} (${user2.phone})`);
     } else {
@@ -57,89 +56,133 @@ async function createTestData() {
 
     // Create conversation
     console.log('\n💬 Creating conversation...');
-    let conversation = await Conversation.findOne({
-      members: { $all: [user1._id, user2._id] },
-      type: 'private',
+    let conversation = await prisma.conversation.findFirst({
+      where: {
+        type: 'PRIVATE',
+        members: {
+          every: {
+            userId: { in: [user1.id, user2.id] },
+          },
+        },
+      },
+      include: {
+        members: true,
+      },
     });
 
-    if (!conversation) {
-      conversation = await Conversation.create({
-        type: 'private',
-        members: [user1._id, user2._id],
-        lastMessageAt: new Date(),
-      });
-      console.log(`✅ Created conversation: ${conversation._id}`);
+    // Verify it's exactly these two users
+    if (conversation && conversation.members.length === 2) {
+      const memberUserIds = conversation.members.map(m => m.userId);
+      if (!memberUserIds.includes(user1.id) || !memberUserIds.includes(user2.id)) {
+        conversation = null;
+      }
     } else {
-      console.log(`ℹ️  Conversation already exists: ${conversation._id}`);
+      conversation = null;
+    }
+
+    if (!conversation) {
+      conversation = await prisma.conversation.create({
+        data: {
+          type: 'PRIVATE',
+          members: {
+            create: [
+              { userId: user1.id },
+              { userId: user2.id },
+            ],
+          },
+          lastMessageAt: new Date(),
+        },
+      });
+      console.log(`✅ Created conversation: ${conversation.id}`);
+    } else {
+      console.log(`ℹ️  Conversation already exists: ${conversation.id}`);
     }
 
     // Create test messages
     console.log('\n📨 Creating test messages...');
     const messages = [
       {
-        conversationId: conversation._id,
-        senderId: user1._id,
-        text: 'Hello Bob! 👋',
-        status: 'sent',
+        conversationId: conversation.id,
+        senderId: user1.id,
+        receiverId: user2.id,
+        content: 'Hello Bob! 👋',
+        type: 'TEXT',
+        status: 'SENT',
       },
       {
-        conversationId: conversation._id,
-        senderId: user2._id,
-        text: 'Hi Alice! How are you?',
-        status: 'sent',
+        conversationId: conversation.id,
+        senderId: user2.id,
+        receiverId: user1.id,
+        content: 'Hi Alice! How are you?',
+        type: 'TEXT',
+        status: 'SENT',
       },
       {
-        conversationId: conversation._id,
-        senderId: user1._id,
-        text: 'I\'m doing great, thanks! 😊',
-        status: 'sent',
+        conversationId: conversation.id,
+        senderId: user1.id,
+        receiverId: user2.id,
+        content: 'I\'m doing great, thanks! 😊',
+        type: 'TEXT',
+        status: 'SENT',
       },
     ];
 
     for (const msgData of messages) {
-      const existingMsg = await Message.findOne({
-        conversationId: msgData.conversationId,
-        senderId: msgData.senderId,
-        text: msgData.text,
+      const existingMsg = await prisma.message.findFirst({
+        where: {
+          conversationId: msgData.conversationId,
+          senderId: msgData.senderId,
+          content: msgData.content,
+        },
       });
 
       if (!existingMsg) {
-        const message = await Message.create({
-          ...msgData,
-          deliveredTo: [user2._id],
-          readBy: [],
+        const message = await prisma.message.create({
+          data: {
+            ...msgData,
+            timestamp: new Date(),
+            createdAt: new Date(),
+            attachments: [],
+            deliveredTo: {
+              connect: { id: user2.id },
+            },
+          },
         });
-        console.log(`✅ Created message: "${message.text}"`);
+        console.log(`✅ Created message: "${message.content}"`);
       }
     }
 
     // Update conversation lastMessageAt
-    const lastMessage = await Message.findOne({ conversationId: conversation._id })
-      .sort({ createdAt: -1 });
+    const lastMessage = await prisma.message.findFirst({
+      where: { conversationId: conversation.id },
+      orderBy: { createdAt: 'desc' },
+    });
     if (lastMessage) {
-      conversation.lastMessageAt = lastMessage.createdAt;
-      await conversation.save();
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { lastMessageAt: lastMessage.createdAt },
+      });
     }
 
     console.log('\n✅ Test data created successfully!');
     console.log('\n📊 Summary:');
-    const userCount = await User.countDocuments();
-    const conversationCount = await Conversation.countDocuments();
-    const messageCount = await Message.countDocuments();
+    const userCount = await prisma.user.count();
+    const conversationCount = await prisma.conversation.count();
+    const messageCount = await prisma.message.count();
     console.log(`  Users: ${userCount}`);
     console.log(`  Conversations: ${conversationCount}`);
     console.log(`  Messages: ${messageCount}`);
 
-    await mongoose.connection.close();
+    await prisma.$disconnect();
     process.exit(0);
 
   } catch (error) {
     console.error('\n❌ Failed to create test data!');
     console.error('Error:', error.message);
     console.error(error.stack);
+    await prisma.$disconnect().catch(() => {});
     process.exit(1);
   }
 }
 
 createTestData();
-

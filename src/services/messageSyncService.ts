@@ -1,6 +1,4 @@
-import mongoose from 'mongoose';
-import { Message, IMessage } from '../models/Message';
-import { Conversation } from '../models/Conversation';
+import { prisma } from '../utils/prisma';
 
 export interface RecentMessage {
   id: string;
@@ -43,66 +41,86 @@ export class MessageSyncService {
     daysBack: number = 7
   ): Promise<ConversationSync[]> {
     try {
-      const userIdObj = new mongoose.Types.ObjectId(userId);
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - daysBack);
 
       // Get all conversations user is part of
-      const conversations = await Conversation.find({
-        members: userIdObj,
-      })
-        .select('_id lastMessageAt')
-        .lean();
+      const conversationMembers = await prisma.conversationMember.findMany({
+        where: {
+          userId,
+        },
+        include: {
+          conversation: {
+            select: {
+              id: true,
+              lastMessageAt: true,
+            },
+          },
+        },
+      });
 
       const conversationSyncs: ConversationSync[] = [];
 
       // For each conversation, get recent messages
-      for (const conv of conversations) {
+      for (const member of conversationMembers) {
+        const convId = member.conversationId;
+        
         // Query messages for this conversation
         // Messages can be linked via conversationId OR senderId/receiverId
-        const messages = await Message.find({
-          $or: [
-            { conversationId: conv._id }, // Group chats or conversation-linked messages
-            { 
-              $and: [
-                { senderId: userIdObj },
-                { receiverId: { $exists: true, $ne: null } }
-              ]
-            }, // User sent messages
-            { receiverId: userIdObj }, // User received messages
-          ],
-          timestamp: { $gte: cutoffDate },
-        })
-          .populate('senderId', 'name avatarUrl phone')
-          .sort({ timestamp: -1 })
-          .limit(limitPerConversation)
-          .lean();
+        const messages = await prisma.message.findMany({
+          where: {
+            OR: [
+              { conversationId: convId }, // Group chats or conversation-linked messages
+              {
+                AND: [
+                  { senderId: userId },
+                  { receiverId: { not: null } },
+                ],
+              }, // User sent messages
+              { receiverId: userId }, // User received messages
+            ],
+            timestamp: { gte: cutoffDate },
+          },
+          include: {
+            sender: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+                phone: true,
+              },
+            },
+          },
+          orderBy: {
+            timestamp: 'desc',
+          },
+          take: limitPerConversation,
+        });
 
         // Format messages
-        const formattedMessages: RecentMessage[] = messages.map((msg: any) => {
-          const sender = msg.senderId;
+        const formattedMessages: RecentMessage[] = messages.map((msg) => {
           return {
-            id: msg._id.toString(),
-            conversationId: msg.conversationId?.toString() || conv._id.toString(),
-            senderId: msg.senderId._id?.toString() || msg.senderId.toString(),
-            receiverId: msg.receiverId?.toString() || '',
-            content: msg.content || msg.text || '',
-            type: msg.type || 'text',
-            status: msg.status || 'sent',
-            timestamp: msg.timestamp?.toISOString() || msg.createdAt?.toISOString() || new Date().toISOString(),
-            sender: sender && typeof sender === 'object' ? {
-              id: sender._id?.toString() || sender.toString(),
-              name: sender.name || 'Unknown',
-              avatarUrl: sender.avatarUrl || undefined,
+            id: msg.id,
+            conversationId: msg.conversationId || convId,
+            senderId: msg.senderId,
+            receiverId: msg.receiverId,
+            content: msg.content || '',
+            type: msg.type,
+            status: msg.status,
+            timestamp: msg.timestamp.toISOString(),
+            sender: msg.sender ? {
+              id: msg.sender.id,
+              name: msg.sender.name,
+              avatarUrl: msg.sender.avatarUrl || undefined,
             } : undefined,
           };
         });
 
         if (formattedMessages.length > 0) {
           conversationSyncs.push({
-            conversationId: conv._id.toString(),
+            conversationId: convId,
             messages: formattedMessages.reverse(), // Oldest first
-            lastMessageAt: conv.lastMessageAt?.toISOString(),
+            lastMessageAt: member.conversation.lastMessageAt?.toISOString(),
           });
         }
       }
@@ -126,46 +144,54 @@ export class MessageSyncService {
     limitPerConversation: number = 50
   ): Promise<ConversationSync[]> {
     try {
-      const userIdObj = new mongoose.Types.ObjectId(userId);
-      const conversationIdObjs = conversationIds.map(id => new mongoose.Types.ObjectId(id));
-
       const conversationSyncs: ConversationSync[] = [];
 
-      for (const convId of conversationIdObjs) {
-        const messages = await Message.find({
-          $or: [
-            { conversationId: convId },
-            { senderId: userIdObj, receiverId: { $exists: true } },
-            { receiverId: userIdObj },
-          ],
-        })
-          .populate('senderId', 'name avatarUrl phone')
-          .sort({ timestamp: -1 })
-          .limit(limitPerConversation)
-          .lean();
+      for (const convId of conversationIds) {
+        const messages = await prisma.message.findMany({
+          where: {
+            OR: [
+              { conversationId: convId },
+              { senderId: userId, receiverId: { not: null } },
+              { receiverId: userId },
+            ],
+          },
+          include: {
+            sender: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+                phone: true,
+              },
+            },
+          },
+          orderBy: {
+            timestamp: 'desc',
+          },
+          take: limitPerConversation,
+        });
 
-        const formattedMessages: RecentMessage[] = messages.map((msg: any) => {
-          const sender = msg.senderId;
+        const formattedMessages: RecentMessage[] = messages.map((msg) => {
           return {
-            id: msg._id.toString(),
-            conversationId: msg.conversationId?.toString() || convId.toString(),
-            senderId: msg.senderId._id?.toString() || msg.senderId.toString(),
-            receiverId: msg.receiverId?.toString() || '',
-            content: msg.content || msg.text || '',
-            type: msg.type || 'text',
-            status: msg.status || 'sent',
-            timestamp: msg.timestamp?.toISOString() || msg.createdAt?.toISOString() || new Date().toISOString(),
-            sender: sender && typeof sender === 'object' ? {
-              id: sender._id?.toString() || sender.toString(),
-              name: sender.name || 'Unknown',
-              avatarUrl: sender.avatarUrl || undefined,
+            id: msg.id,
+            conversationId: msg.conversationId || convId,
+            senderId: msg.senderId,
+            receiverId: msg.receiverId,
+            content: msg.content || '',
+            type: msg.type,
+            status: msg.status,
+            timestamp: msg.timestamp.toISOString(),
+            sender: msg.sender ? {
+              id: msg.sender.id,
+              name: msg.sender.name,
+              avatarUrl: msg.sender.avatarUrl || undefined,
             } : undefined,
           };
         });
 
         if (formattedMessages.length > 0) {
           conversationSyncs.push({
-            conversationId: convId.toString(),
+            conversationId: convId,
             messages: formattedMessages.reverse(),
           });
         }
@@ -180,4 +206,3 @@ export class MessageSyncService {
 }
 
 export const messageSyncService = new MessageSyncService();
-

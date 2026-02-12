@@ -1,0 +1,183 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User Model
+model User {
+  id            String   @id @default(uuid())
+  name          String
+  phone         String   @unique
+  password      String?
+  avatarUrl     String?
+  token         String   @unique
+  activeDevices Json     @default("[]") // Array of IActiveDevice objects
+  lastSeen      DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  // Relations
+  sentMessages      Message[]        @relation("MessageSender")
+  receivedMessages  Message[]        @relation("MessageReceiver")
+  conversations     ConversationMember[]
+  refreshTokens     RefreshToken[]
+  qrChallenges      QRChallenge[]
+  deliveredMessages Message[]        @relation("MessageDeliveredTo")
+  readMessages      Message[]        @relation("MessageReadBy")
+
+  @@index([phone])
+  @@index([token])
+  @@index([lastSeen(sort: Desc)])
+  @@map("users")
+}
+
+// Message Model
+model Message {
+  id             String        @id @default(uuid())
+  senderId       String
+  receiverId     String
+  content        String
+  type           MessageType   @default(TEXT)
+  status         MessageStatus @default(SENT)
+  timestamp      DateTime      @default(now())
+  conversationId String?
+  attachments    Json          @default("[]") // Array of IMessageAttachment objects
+  clientId       String?       @unique
+  createdAt      DateTime      @default(now())
+
+  // Relations
+  sender      User         @relation("MessageSender", fields: [senderId], references: [id])
+  receiver    User         @relation("MessageReceiver", fields: [receiverId], references: [id])
+  conversation Conversation? @relation(fields: [conversationId], references: [id])
+  deliveredTo User[]       @relation("MessageDeliveredTo")
+  readBy      User[]       @relation("MessageReadBy")
+
+  @@index([senderId, receiverId, timestamp(sort: Desc)])
+  @@index([receiverId, timestamp(sort: Desc)])
+  @@index([senderId, timestamp(sort: Desc)])
+  @@index([status, timestamp(sort: Desc)])
+  @@index([timestamp(sort: Desc)])
+  @@index([senderId, receiverId, status])
+  @@index([conversationId, timestamp(sort: Desc)])
+  @@index([clientId])
+  @@map("messages")
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  FILE
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+}
+
+// Conversation Model
+model Conversation {
+  id           String             @id @default(uuid())
+  type         ConversationType   @default(PRIVATE)
+  title        String?
+  lastMessageAt DateTime?
+  createdAt    DateTime           @default(now())
+
+  // Relations
+  members      ConversationMember[]
+  messages     Message[]
+  archivedBy   ConversationArchive[]
+
+  @@index([lastMessageAt(sort: Desc)])
+  @@map("conversations")
+}
+
+enum ConversationType {
+  PRIVATE
+  GROUP
+}
+
+// Many-to-many relationship for Conversation members
+model ConversationMember {
+  id             String       @id @default(uuid())
+  conversationId String
+  userId         String
+  createdAt      DateTime     @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+  @@map("conversation_members")
+}
+
+// Many-to-many relationship for archived conversations
+model ConversationArchive {
+  id             String       @id @default(uuid())
+  conversationId String
+  userId         String
+  createdAt      DateTime     @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+  @@map("conversation_archives")
+}
+
+// QR Challenge Model
+model QRChallenge {
+  id              String    @id @default(uuid())
+  token           String    @unique
+  expiresAt       DateTime
+  authorizedUserId String?
+  createdAt       DateTime  @default(now())
+
+  // Relations
+  authorizedUser User? @relation(fields: [authorizedUserId], references: [id])
+
+  @@index([token])
+  @@index([expiresAt])
+  @@map("qr_challenges")
+}
+
+// Refresh Token Model
+model RefreshToken {
+  id          String   @id @default(uuid())
+  userId      String
+  token       String   @unique
+  accessToken String?
+  deviceId    String?
+  deviceType  DeviceType @default(MOBILE)
+  userAgent   String?
+  ipAddress   String?
+  expiresAt   DateTime
+  lastUsedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, deviceType])
+  @@index([token])
+  @@index([userId, lastUsedAt(sort: Desc)])
+  @@index([deviceId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+enum DeviceType {
+  MOBILE
+  DESKTOP
+}

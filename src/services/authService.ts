@@ -1,7 +1,4 @@
-import mongoose from 'mongoose';
-import { QRChallenge, IQRChallenge } from '../models/QRChallenge';
-import { User, IUser } from '../models/User';
-import { RefreshToken, IRefreshToken } from '../models/RefreshToken';
+import { prisma } from '../utils/prisma';
 import { generateQRToken, generateUserToken } from '../utils/tokenGenerator';
 import {
   signAccessToken,
@@ -9,6 +6,7 @@ import {
   generateRefreshTokenString,
   getRefreshTokenExpirationDate,
 } from '../utils/jwt';
+import { User, QRChallenge, RefreshToken } from '@prisma/client';
 
 // QR Token expiry: 2-5 minutes (configurable via env)
 const QR_TOKEN_TTL_MINUTES = parseInt(process.env.QR_TOKEN_TTL_MINUTES || '3', 10);
@@ -49,7 +47,7 @@ export class AuthService {
     avatarUrl?: string
   ): Promise<{
     success: boolean;
-    user?: IUser;
+    user?: User;
     token?: string;
     error?: string;
   }> {
@@ -63,7 +61,9 @@ export class AuthService {
       }
 
       // Check if user already exists
-      const existingUser = await User.findOne({ phone: trimmedPhone });
+      const existingUser = await prisma.user.findUnique({
+        where: { phone: trimmedPhone },
+      });
       if (existingUser) {
         return { success: false, error: 'User with this phone number already exists' };
       }
@@ -77,7 +77,9 @@ export class AuthService {
       // Ensure token is unique
       while (!isUnique && attempts < maxAttempts) {
         userToken = generateUserToken();
-        const existingTokenUser = await User.findOne({ token: userToken });
+        const existingTokenUser = await prisma.user.findUnique({
+          where: { token: userToken },
+        });
         if (!existingTokenUser) {
           isUnique = true;
         }
@@ -90,18 +92,20 @@ export class AuthService {
       }
 
       // Create new user with token
-      const newUser = await User.create({
-        name: trimmedName,
-        phone: trimmedPhone,
-        token: userToken!,
-        avatarUrl: avatarUrl || null,
-        activeDevices: [],
-        lastSeen: new Date(),
-        createdAt: new Date(),
+      const newUser = await prisma.user.create({
+        data: {
+          name: trimmedName,
+          phone: trimmedPhone,
+          token: userToken!,
+          avatarUrl: avatarUrl || null,
+          activeDevices: [],
+          lastSeen: new Date(),
+          createdAt: new Date(),
+        },
       });
 
       console.log('User registered successfully:', {
-        id: newUser._id,
+        id: newUser.id,
         phone: newUser.phone,
         name: newUser.name,
         token: newUser.token,
@@ -116,8 +120,8 @@ export class AuthService {
       console.error('User registration error:', error);
       
       // Handle duplicate key error (phone or token)
-      if (error.code === 11000) {
-        const field = Object.keys(error.keyPattern)[0];
+      if (error.code === 'P2002') {
+        const field = error.meta?.target?.[0] || 'field';
         return {
           success: false,
           error: `${field === 'phone' ? 'Phone number' : 'Token'} already exists`,
@@ -138,14 +142,16 @@ export class AuthService {
       console.log('Send OTP request for phone:', trimmedPhone);
       
       // Find user by phone
-      const user = await User.findOne({ phone: trimmedPhone });
+      const user = await prisma.user.findUnique({
+        where: { phone: trimmedPhone },
+      });
       
       if (!user) {
         console.log('User not found for phone:', trimmedPhone);
         return { success: false, error: 'User not found. Please contact support.' };
       }
       
-      console.log('OTP sent (using default OTP) for user:', { id: user._id, phone: user.phone, name: user.name });
+      console.log('OTP sent (using default OTP) for user:', { id: user.id, phone: user.phone, name: user.name });
       
       // In a real implementation, you would send OTP via SMS service
       // For now, we just return success as OTP is "test123" for all users
@@ -166,7 +172,7 @@ export class AuthService {
     deviceId?: string
   ): Promise<{
     success: boolean;
-    user?: IUser;
+    user?: User;
     accessToken?: string;
     refreshToken?: string;
     error?: string;
@@ -176,14 +182,16 @@ export class AuthService {
       console.log('OTP verification attempt (Mobile):', { phone: trimmedPhone, otpLength: otp.length });
       
       // Find user by phone
-      const user = await User.findOne({ phone: trimmedPhone });
+      const user = await prisma.user.findUnique({
+        where: { phone: trimmedPhone },
+      });
       
       if (!user) {
         console.log('User not found for phone:', trimmedPhone);
         return { success: false, error: 'Invalid phone number or OTP' };
       }
       
-      console.log('User found:', { id: user._id, phone: user.phone, name: user.name });
+      console.log('User found:', { id: user.id, phone: user.phone, name: user.name });
 
       // Verify OTP (using default OTP "test123")
       if (otp !== this.DEFAULT_OTP) {
@@ -203,11 +211,17 @@ export class AuthService {
         // Ensure token is unique
         while (!isUnique && attempts < maxAttempts) {
           userToken = generateUserToken();
-          const existingUser = await User.findOne({ token: userToken });
+          const existingUser = await prisma.user.findUnique({
+            where: { token: userToken },
+          });
           if (!existingUser) {
             isUnique = true;
+            // Update user with token
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { token: userToken },
+            });
             user.token = userToken;
-            await user.save();
             console.log('Generated unique user token:', userToken);
           }
           attempts++;
@@ -220,18 +234,20 @@ export class AuthService {
       }
 
       // Generate tokens
-      const accessToken = signAccessToken({ userId: user._id.toString(), phone: user.phone });
+      const accessToken = signAccessToken({ userId: user.id, phone: user.phone });
       const refreshTokenString = generateRefreshTokenString();
-      const refreshToken = signRefreshToken({ userId: user._id.toString(), phone: user.phone });
+      const refreshToken = signRefreshToken({ userId: user.id, phone: user.phone });
 
       // Store refresh token in database
       const expiresAt = getRefreshTokenExpirationDate();
-      await RefreshToken.create({
-        userId: user._id,
-        token: refreshTokenString,
-        deviceId: deviceId,
-        deviceType: 'mobile',
-        expiresAt,
+      await prisma.refreshToken.create({
+        data: {
+          userId: user.id,
+          token: refreshTokenString,
+          deviceId: deviceId,
+          deviceType: 'MOBILE',
+          expiresAt,
+        },
       });
 
       console.log('Refresh token stored in database');
@@ -261,7 +277,9 @@ export class AuthService {
   }> {
     try {
       // Find refresh token in database
-      const refreshTokenDoc = await RefreshToken.findOne({ token: refreshTokenString });
+      const refreshTokenDoc = await prisma.refreshToken.findUnique({
+        where: { token: refreshTokenString },
+      });
 
       if (!refreshTokenDoc) {
         console.log('Refresh token not found in database');
@@ -272,12 +290,16 @@ export class AuthService {
       if (new Date() > refreshTokenDoc.expiresAt) {
         console.log('Refresh token expired');
         // Delete expired token
-        await RefreshToken.findByIdAndDelete(refreshTokenDoc._id);
+        await prisma.refreshToken.delete({
+          where: { id: refreshTokenDoc.id },
+        });
         return { success: false, error: 'Refresh token expired' };
       }
 
       // Get user
-      const user = await User.findById(refreshTokenDoc.userId);
+      const user = await prisma.user.findUnique({
+        where: { id: refreshTokenDoc.userId },
+      });
       if (!user) {
         console.log('User not found for refresh token');
         return { success: false, error: 'User not found' };
@@ -285,7 +307,7 @@ export class AuthService {
 
       // Generate new access token
       const accessToken = signAccessToken({
-        userId: user._id.toString(),
+        userId: user.id,
         phone: user.phone,
       });
 
@@ -306,8 +328,10 @@ export class AuthService {
    */
   async revokeRefreshToken(refreshTokenString: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const result = await RefreshToken.deleteOne({ token: refreshTokenString });
-      if (result.deletedCount > 0) {
+      const result = await prisma.refreshToken.deleteMany({
+        where: { token: refreshTokenString },
+      });
+      if (result.count > 0) {
         console.log('Refresh token revoked');
         return { success: true };
       }
@@ -328,19 +352,21 @@ export class AuthService {
     const token = generateQRToken();
     const expiresAt = new Date(Date.now() + QR_TOKEN_EXPIRY_MINUTES * 60 * 1000);
 
-    const challenge = await QRChallenge.create({
-      token,
-      expiresAt,
+    const challenge = await prisma.qRChallenge.create({
+      data: {
+        token,
+        expiresAt,
+      },
     });
 
     // QR code should display just the token (UUID)
     // Desktop will poll /auth/qr-status?challengeId=... to check approval
     const qrPayload = token; // Just the UUID token, not full URL
 
-    console.log(`QR Challenge created: ${challenge._id}, token: ${token}, expires in ${QR_TOKEN_EXPIRY_MINUTES} minutes`);
+    console.log(`QR Challenge created: ${challenge.id}, token: ${token}, expires in ${QR_TOKEN_EXPIRY_MINUTES} minutes`);
 
     return {
-      challengeId: challenge._id.toString(),
+      challengeId: challenge.id,
       qrPayload, // UUID token for QR code
     };
   }
@@ -352,7 +378,9 @@ export class AuthService {
     token: string,
     userId: string
   ): Promise<{ success: boolean; challengeId?: string; error?: string }> {
-    const challenge = await QRChallenge.findOne({ token });
+    const challenge = await prisma.qRChallenge.findUnique({
+      where: { token },
+    });
 
     if (!challenge) {
       return { success: false, error: 'Invalid token' };
@@ -369,12 +397,14 @@ export class AuthService {
     }
 
     // Authorize the challenge
-    challenge.authorizedUserId = new mongoose.Types.ObjectId(userId);
-    await challenge.save();
+    const updatedChallenge = await prisma.qRChallenge.update({
+      where: { id: challenge.id },
+      data: { authorizedUserId: userId },
+    });
 
     return {
       success: true,
-      challengeId: challenge._id.toString(),
+      challengeId: updatedChallenge.id,
     };
   }
 
@@ -382,7 +412,9 @@ export class AuthService {
    * Get QR challenge status
    */
   async getQRStatus(challengeId: string): Promise<QRStatusResponse> {
-    const challenge = await QRChallenge.findById(challengeId);
+    const challenge = await prisma.qRChallenge.findUnique({
+      where: { id: challengeId },
+    });
 
     if (!challenge) {
       return { status: 'expired' };
@@ -395,12 +427,14 @@ export class AuthService {
 
     // Check if authorized
     if (challenge.authorizedUserId) {
-      const user = await User.findById(challenge.authorizedUserId);
+      const user = await prisma.user.findUnique({
+        where: { id: challenge.authorizedUserId },
+      });
       if (user) {
         return {
           status: 'authorized',
           user: {
-            id: user._id.toString(),
+            id: user.id,
             name: user.name,
             avatar: user.avatarUrl || undefined,
           },
@@ -420,10 +454,12 @@ export class AuthService {
     success: boolean;
     accessToken?: string;
     refreshToken?: string;
-    user?: IUser;
+    user?: User;
     error?: string;
   }> {
-    const challenge = await QRChallenge.findById(challengeId);
+    const challenge = await prisma.qRChallenge.findUnique({
+      where: { id: challengeId },
+    });
 
     if (!challenge) {
       return { success: false, error: 'Invalid challenge' };
@@ -440,27 +476,33 @@ export class AuthService {
     }
 
     // Get user information
-    const user = await User.findById(challenge.authorizedUserId);
+    const user = await prisma.user.findUnique({
+      where: { id: challenge.authorizedUserId },
+    });
     if (!user) {
       return { success: false, error: 'User not found' };
     }
 
     // Generate tokens for desktop session
-    const accessToken = signAccessToken({ userId: user._id.toString(), phone: user.phone });
+    const accessToken = signAccessToken({ userId: user.id, phone: user.phone });
     const refreshTokenString = generateRefreshTokenString();
-    const refreshToken = signRefreshToken({ userId: user._id.toString(), phone: user.phone });
+    const refreshToken = signRefreshToken({ userId: user.id, phone: user.phone });
 
     // Store refresh token for desktop device
     const expiresAt = getRefreshTokenExpirationDate();
-    await RefreshToken.create({
-      userId: user._id,
-      token: refreshTokenString,
-      deviceType: 'desktop',
-      expiresAt,
+    await prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        token: refreshTokenString,
+        deviceType: 'DESKTOP',
+        expiresAt,
+      },
     });
 
     // Delete challenge (one-time use)
-    await QRChallenge.findByIdAndDelete(challengeId);
+    await prisma.qRChallenge.delete({
+      where: { id: challengeId },
+    });
 
     console.log('Desktop session created via QR code');
 
@@ -475,7 +517,7 @@ export class AuthService {
   /**
    * Search for users by phone number
    */
-  async searchUsersByPhone(phone: string, excludeUserId?: string): Promise<{ success: boolean; users?: Array<{ _id: mongoose.Types.ObjectId; name: string; phone: string; avatarUrl?: string | null }>; error?: string }> {
+  async searchUsersByPhone(phone: string, excludeUserId?: string): Promise<{ success: boolean; users?: Array<{ id: string; name: string; phone: string; avatarUrl?: string | null }>; error?: string }> {
     try {
       const trimmedPhone = phone.trim();
       
@@ -483,24 +525,38 @@ export class AuthService {
         return { success: false, error: 'Please enter at least 3 characters' };
       }
 
-      // Search for users by phone (partial match)
-      const query: any = {
-        phone: { $regex: trimmedPhone, $options: 'i' }
+      // Search for users by phone (partial match using contains)
+      const where: any = {
+        phone: {
+          contains: trimmedPhone,
+          mode: 'insensitive',
+        },
       };
 
       // Exclude current user if provided
       if (excludeUserId) {
-        query._id = { $ne: new mongoose.Types.ObjectId(excludeUserId) };
+        where.id = { not: excludeUserId };
       }
 
-      const users = await User.find(query)
-        .select('name phone avatarUrl')
-        .limit(10)
-        .lean();
+      const users = await prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          avatarUrl: true,
+        },
+        take: 10,
+      });
 
       return {
         success: true,
-        users: users as Array<{ _id: mongoose.Types.ObjectId; name: string; phone: string; avatarUrl?: string | null }>,
+        users: users.map(u => ({
+          id: u.id,
+          name: u.name,
+          phone: u.phone,
+          avatarUrl: u.avatarUrl,
+        })),
       };
     } catch (error) {
       console.error('Error searching users:', error);

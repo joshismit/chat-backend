@@ -12,7 +12,7 @@ services:
     environment:
       - NODE_ENV=development
       - PORT=3000
-      - MONGO_URI=${MONGO_URI:-mongodb://mongo:27017/newchatapp}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:password@postgres:5432/chatappdb}
       - JWT_SECRET=${JWT_SECRET:-dev-secret-key-change-in-production}
       - JWT_EXPIRES_IN=7d
       - CORS_ORIGIN=http://localhost:19006,http://localhost:8081
@@ -32,7 +32,7 @@ services:
       - ./uploads:/app/uploads
       - ./logs:/app/logs
     depends_on:
-      - mongo
+      - postgres
       - redis
     restart: unless-stopped
     networks:
@@ -44,24 +44,23 @@ services:
       retries: 3
       start_period: 40s
 
-  # MongoDB
-  mongo:
-    image: mongo:7.0
-    container_name: chat-mongo
+  # PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: chat-postgres
     ports:
-      - "27017:27017"
+      - "5432:5432"
     environment:
-      - MONGO_INITDB_DATABASE=newchatapp
-      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME:-admin}
-      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:-password}
+      - POSTGRES_DB=${POSTGRES_DB:-chatappdb}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
     volumes:
-      - mongo-data:/data/db
-      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+      - postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
     networks:
       - chat-network
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -103,7 +102,7 @@ services:
       - nginx  # Only start with: docker-compose --profile nginx up
 
 volumes:
-  mongo-data:
+  postgres-data:
     driver: local
   redis-data:
     driver: local

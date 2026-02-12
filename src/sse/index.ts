@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { verifyToken, JWTPayload } from '../utils/jwt';
-import { Conversation } from '../models/Conversation';
-import mongoose from 'mongoose';
+import { prisma } from '../utils/prisma';
 
 export interface SSEEvent {
   id?: string; // Event ID for reconnection
@@ -176,12 +175,17 @@ class SSEManager {
     payload: any
   ): Promise<number> {
     // Get conversation members from database
-    const conversation = await Conversation.findById(conversationId).select('members');
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+      include: {
+        members: true,
+      },
+    });
     if (!conversation) {
       return 0;
     }
 
-    const memberIds = conversation.members.map((id) => id.toString());
+    const memberIds = conversation.members.map((member) => member.userId);
     let sentCount = 0;
 
     const event: SSEEvent = {
