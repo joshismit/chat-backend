@@ -48,6 +48,7 @@ import attachmentRoutes from './routes/attachmentRoutes';
 import qrRoutes from './routes/qrRoutes';
 import sessionRoutes from './routes/sessionRoutes';
 import sseRoutes from './routes/sseRoutes';
+import callRoutes from './routes/callRoutes';
 
 // Authentication routes
 app.use('/auth', authRoutes);
@@ -67,6 +68,7 @@ app.use('/messages/sse', sseRoutes);
 app.use('/sse', sseRoutes);
 app.use('/conversations', conversationRoutes);
 app.use('/attachments', attachmentRoutes);
+app.use('/calls', callRoutes);
 // app.use('/api/chat', chatRoutes);
 
 // Connect to PostgreSQL via Prisma

@@ -29,6 +29,8 @@ model User {
   qrChallenges      QRChallenge[]
   deliveredMessages Message[]        @relation("MessageDeliveredTo")
   readMessages      Message[]        @relation("MessageReadBy")
+  sentCalls         Call[]           @relation("CallCaller")
+  receivedCalls     Call[]           @relation("CallReceiver")
 
   @@index([phone])
   @@index([token])
@@ -94,6 +96,7 @@ model Conversation {
   members      ConversationMember[]
   messages     Message[]
   archivedBy   ConversationArchive[]
+  calls        Call[]
 
   @@index([lastMessageAt(sort: Desc)])
   @@map("conversations")
@@ -179,4 +182,45 @@ model RefreshToken {
 enum DeviceType {
   MOBILE
   DESKTOP
+}
+
+// Call Model
+model Call {
+  id             String     @id @default(uuid())
+  type           CallType   @default(VIDEO)
+  status         CallStatus @default(INITIATED)
+  callerId       String
+  receiverId     String
+  conversationId String?
+  roomId         String     @unique // LiveKit room name
+  startTime      DateTime   @default(now())
+  endTime        DateTime?
+  duration       Int?       // in seconds
+  createdAt      DateTime   @default(now())
+
+  // Relations
+  caller       User          @relation("CallCaller", fields: [callerId], references: [id])
+  receiver     User          @relation("CallReceiver", fields: [receiverId], references: [id])
+  conversation Conversation? @relation(fields: [conversationId], references: [id])
+
+  @@index([callerId])
+  @@index([receiverId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("calls")
+}
+
+enum CallType {
+  VOICE
+  VIDEO
+}
+
+enum CallStatus {
+  INITIATED
+  RINGING
+  ACCEPTED
+  REJECTED
+  MISSED
+  ENDED
+  BUSY
 }
