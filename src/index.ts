@@ -1,11 +1,11 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
-import dotenv from 'dotenv';
 import { getDatabaseUrl } from './utils/dbConfig';
 import { prisma } from './utils/prisma';
-
-dotenv.config();
 
 const app: Express = express();
 // PORT from environment variable or default to 3000
@@ -17,11 +17,11 @@ const DATABASE_URL = getDatabaseUrl();
 // CORS configuration - allow all origins in development, specific origins in production
 // For mobile apps (React Native/Expo), CORS doesn't apply, but we still need to allow requests
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN 
-    ? process.env.CORS_ORIGIN === '*' 
+  origin: process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN === '*'
       ? true // Allow all origins if explicitly set to *
       : process.env.CORS_ORIGIN.split(',').map((origin: string) => origin.trim())
-    : process.env.NODE_ENV === 'production' 
+    : process.env.NODE_ENV === 'production'
       ? true // Allow all origins in production if CORS_ORIGIN not set (for mobile apps)
       : true, // Allow all in development
   credentials: true,
@@ -75,11 +75,11 @@ async function connectDatabase() {
     // Test database connection
     await prisma.$connect();
     console.log(`✅ Connected to PostgreSQL`);
-    
+
     // Verify connection by running a simple query
     await prisma.$queryRaw`SELECT 1`;
     console.log(`🔗 Database connection verified`);
-    
+
     // Start server
     // Listen on all interfaces (0.0.0.0) to accept connections from network
     const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : '0.0.0.0';

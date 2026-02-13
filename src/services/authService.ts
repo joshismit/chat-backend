@@ -118,7 +118,7 @@ export class AuthService {
       };
     } catch (error: any) {
       console.error('User registration error:', error);
-      
+
       // Handle duplicate key error (phone or token)
       if (error.code === 'P2002') {
         const field = error.meta?.target?.[0] || 'field';
@@ -140,19 +140,19 @@ export class AuthService {
     try {
       const trimmedPhone = phone.trim();
       console.log('Send OTP request for phone:', trimmedPhone);
-      
+
       // Find user by phone
       const user = await prisma.user.findUnique({
         where: { phone: trimmedPhone },
       });
-      
+
       if (!user) {
         console.log('User not found for phone:', trimmedPhone);
         return { success: false, error: 'User not found. Please contact support.' };
       }
-      
+
       console.log('OTP sent (using default OTP) for user:', { id: user.id, phone: user.phone, name: user.name });
-      
+
       // In a real implementation, you would send OTP via SMS service
       // For now, we just return success as OTP is "test123" for all users
       return { success: true };
@@ -180,17 +180,17 @@ export class AuthService {
     try {
       const trimmedPhone = phone.trim();
       console.log('OTP verification attempt (Mobile):', { phone: trimmedPhone, otpLength: otp.length });
-      
+
       // Find user by phone
       const user = await prisma.user.findUnique({
         where: { phone: trimmedPhone },
       });
-      
+
       if (!user) {
         console.log('User not found for phone:', trimmedPhone);
         return { success: false, error: 'Invalid phone number or OTP' };
       }
-      
+
       console.log('User found:', { id: user.id, phone: user.phone, name: user.name });
 
       // Verify OTP (using default OTP "test123")
@@ -520,22 +520,32 @@ export class AuthService {
   async searchUsersByPhone(phone: string, excludeUserId?: string): Promise<{ success: boolean; users?: Array<{ id: string; name: string; phone: string; avatarUrl?: string | null }>; error?: string }> {
     try {
       const trimmedPhone = phone.trim();
-      
+
       if (!trimmedPhone || trimmedPhone.length < 3) {
         return { success: false, error: 'Please enter at least 3 characters' };
       }
 
-      // Search for users by phone (partial match using contains)
+      // Search for users by phone or name (partial match)
       const where: any = {
-        phone: {
-          contains: trimmedPhone,
-          mode: 'insensitive',
-        },
+        OR: [
+          {
+            phone: {
+              contains: trimmedPhone,
+              mode: 'insensitive',
+            },
+          },
+          {
+            name: {
+              contains: trimmedPhone,
+              mode: 'insensitive',
+            },
+          },
+        ],
       };
 
       // Exclude current user if provided
       if (excludeUserId) {
-        where.id = { not: excludeUserId };
+        where.AND = [{ id: { not: excludeUserId } }];
       }
 
       const users = await prisma.user.findMany({
