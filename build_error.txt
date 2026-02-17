@@ -1,0 +1,26 @@
+﻿
+> newchatapp-backend@1.0.0 build
+> tsc
+
+src/models/Conversation.ts(1,44): error TS2307: Cannot find module 'mongoose' or its corresponding type declarations.
+src/models/Message.ts(1,44): error TS2307: Cannot find module 'mongoose' or its corresponding type declarations.
+src/models/Message.ts(170,36): error TS7006: Parameter 'next' implicitly has an 'any' type.
+src/models/Message.ts(171,7): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+src/models/Message.ts(171,22): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+src/models/Message.ts(172,5): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+src/models/Message.ts(175,7): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+src/models/Message.ts(176,5): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+src/models/Message.ts(176,22): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+src/models/QRChallenge.ts(1,44): error TS2307: Cannot find module 'mongoose' or its corresponding type declarations.
+src/models/RefreshToken.ts(1,44): error TS2307: Cannot find module 'mongoose' or its corresponding type declarations.
+src/models/User.ts(1,44): error TS2307: Cannot find module 'mongoose' or its corresponding type declarations.
+src/services/messageSyncService.ts(77,35): error TS2322: Type 'null' is not assignable to type 'string | NestedStringFilter<"Message"> | undefined'.
+src/services/messageSyncService.ts(111,25): error TS2551: Property 'sender' does not exist on type '{ id: string; createdAt: Date; senderId: string; receiverId: string; content: string; type: MessageType; status: MessageStatus; timestamp: Date; conversationId: string | null; attachments: JsonValue; clientId: string | null; }'. Did you mean 'senderId'?
+src/services/messageSyncService.ts(112,23): error TS2551: Property 'sender' does not exist on type '{ id: string; createdAt: Date; senderId: string; receiverId: string; content: string; type: MessageType; status: MessageStatus; timestamp: Date; conversationId: string | null; attachments: JsonValue; clientId: string | null; }'. Did you mean 'senderId'?
+src/services/messageSyncService.ts(113,25): error TS2551: Property 'sender' does not exist on type '{ id: string; createdAt: Date; senderId: string; receiverId: string; content: string; type: MessageType; status: MessageStatus; timestamp: Date; conversationId: string | null; attachments: JsonValue; clientId: string | null; }'. Did you mean 'senderId'?
+src/services/messageSyncService.ts(114,30): error TS2551: Property 'sender' does not exist on type '{ id: string; createdAt: Date; senderId: string; receiverId: string; content: string; type: MessageType; status: MessageStatus; timestamp: Date; conversationId: string | null; attachments: JsonValue; clientId: string | null; }'. Did you mean 'senderId'?
+src/services/messageSyncService.ts(154,49): error TS2322: Type 'null' is not assignable to type 'string | NestedStringFilter<"Message"> | undefined'.
+src/services/messageSyncService.ts(184,25): error TS2551: Property 'sender' does not exist on type '{ id: string; createdAt: Date; senderId: string; receiverId: string; content: string; type: MessageType; status: MessageStatus; timestamp: Date; conversationId: string | null; attachments: JsonValue; clientId: string | null; }'. Did you mean 'senderId'?
+src/services/messageSyncService.ts(185,23): error TS2551: Property 'sender' does not exist on type '{ id: string; createdAt: Date; senderId: string; receiverId: string; content: string; type: MessageType; status: MessageStatus; timestamp: Date; conversationId: string | null; attachments: JsonValue; clientId: string | null; }'. Did you mean 'senderId'?
+src/services/messageSyncService.ts(186,25): error TS2551: Property 'sender' does not exist on type '{ id: string; createdAt: Date; senderId: string; receiverId: string; content: string; type: MessageType; status: MessageStatus; timestamp: Date; conversationId: string | null; attachments: JsonValue; clientId: string | null; }'. Did you mean 'senderId'?
+src/services/messageSyncService.ts(187,30): error TS2551: Property 'sender' does not exist on type '{ id: string; createdAt: Date; senderId: string; receiverId: string; content: string; type: MessageType; status: MessageStatus; timestamp: Date; conversationId: string | null; attachments: JsonValue; clientId: string | null; }'. Did you mean 'senderId'?

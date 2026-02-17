@@ -64,7 +64,7 @@ export class MessageSyncService {
       // For each conversation, get recent messages
       for (const member of conversationMembers) {
         const convId = member.conversationId;
-        
+
         // Query messages for this conversation
         // Messages can be linked via conversationId OR senderId/receiverId
         const messages = await prisma.message.findMany({
@@ -74,7 +74,7 @@ export class MessageSyncService {
               {
                 AND: [
                   { senderId: userId },
-                  { receiverId: { not: null } },
+                  { receiverId: { not: '' } }, // Changed to check not empty string if needed, or just remove
                 ],
               }, // User sent messages
               { receiverId: userId }, // User received messages
@@ -151,7 +151,7 @@ export class MessageSyncService {
           where: {
             OR: [
               { conversationId: convId },
-              { senderId: userId, receiverId: { not: null } },
+              { senderId: userId, receiverId: { not: '' } },
               { receiverId: userId },
             ],
           },

@@ -119,6 +119,7 @@ export class ConversationController {
       }
 
       const { type, title, memberIds }: CreateConversationRequest = req.body;
+      console.log('[BE] createConversation request:', { userId, type, title, memberIds });
 
       // Validation
       if (!memberIds || !Array.isArray(memberIds) || memberIds.length === 0) {
@@ -127,8 +128,9 @@ export class ConversationController {
       }
 
       // Determine conversation type
+      const normalizedType = type ? (type.toUpperCase() as ConversationType) : null;
       const conversationType =
-        type || (memberIds.length === 1 ? ConversationType.PRIVATE : ConversationType.GROUP);
+        normalizedType || (memberIds.length === 1 ? ConversationType.PRIVATE : ConversationType.GROUP);
 
       // Validate group conversation has title
       if (conversationType === ConversationType.GROUP && !title) {

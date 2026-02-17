@@ -178,20 +178,33 @@ export class AuthService {
     error?: string;
   }> {
     try {
-      const trimmedPhone = phone.trim();
-      console.log('OTP verification attempt (Mobile):', { phone: trimmedPhone, otpLength: otp.length });
+      // Clean phone number: remove spaces, dashes, parentheses
+      const cleanedPhone = phone.trim().replace(/[\s\-\(\)]/g, '');
+      console.log('OTP verification attempt (Mobile):', { phone: cleanedPhone, original: phone, otpLength: otp.length });
 
       // Find user by phone
-      const user = await prisma.user.findUnique({
-        where: { phone: trimmedPhone },
+      let user = await prisma.user.findUnique({
+        where: { phone: cleanedPhone },
       });
 
+      // Special case for development: If user not found and using default OTP, create them!
+      if (!user && otp === this.DEFAULT_OTP) {
+        console.log('User not found, but using default OTP. Creating dummy user for:', cleanedPhone);
+        user = await prisma.user.create({
+          data: {
+            phone: cleanedPhone,
+            name: `User ${cleanedPhone.slice(-4)}`, // Default name
+            token: generateUserToken(),
+          }
+        });
+      }
+
       if (!user) {
-        console.log('User not found for phone:', trimmedPhone);
+        console.log('User not found and not using default OTP or creation failed:', cleanedPhone);
         return { success: false, error: 'Invalid phone number or OTP' };
       }
 
-      console.log('User found:', { id: user.id, phone: user.phone, name: user.name });
+      console.log('User session authorized:', { id: user.id, phone: user.phone, name: user.name });
 
       // Verify OTP (using default OTP "test123")
       if (otp !== this.DEFAULT_OTP) {

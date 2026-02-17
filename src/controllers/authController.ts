@@ -84,6 +84,7 @@ export class AuthController {
   verifyOTP = async (req: Request, res: Response): Promise<void> => {
     try {
       const { phone, otp, deviceId } = req.body;
+      console.log('[Auth] verifyOTP request:', { phone, otp, deviceId });
 
       if (!phone || !otp) {
         res.status(400).json({ error: 'Phone number and OTP are required' });
@@ -234,8 +235,8 @@ export class AuthController {
         return;
       }
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         challengeId: result.challengeId,
         message: 'Desktop session authorized successfully'
       });

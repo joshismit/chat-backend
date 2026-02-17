@@ -15,7 +15,10 @@ export const authenticate = async (
 ): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
-    const token = extractTokenFromHeader(authHeader);
+    // Also check for token in query params (useful for SSE connections on web)
+    const queryToken = req.query.token as string;
+
+    const token = extractTokenFromHeader(authHeader) || queryToken;
 
     if (!token) {
       res.status(401).json({ error: 'Authentication required' });

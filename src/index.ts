@@ -78,6 +78,15 @@ async function connectDatabase() {
     await prisma.$connect();
     console.log(`✅ Connected to PostgreSQL`);
 
+    // Initialize Redis (optional but recommended for production SSE scaling)
+    const { initRedis } = require('./services/redisService');
+    try {
+      initRedis();
+      console.log('🔄 Redis Service initialized');
+    } catch (redisError) {
+      console.warn('⚠️ Redis initialization failed (continuing without Redis):', redisError);
+    }
+
     // Verify connection by running a simple query
     await prisma.$queryRaw`SELECT 1`;
     console.log(`🔗 Database connection verified`);
