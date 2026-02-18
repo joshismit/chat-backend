@@ -11,30 +11,43 @@ services:
         fromDatabase:
           name: newchatapp-db
           property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: newchatapp-redis
+          property: connectionString
       - key: NODE_ENV
         value: production
       - key: JWT_SECRET
         generateValue: true
       - key: PORT
         value: 10000
+      - key: CORS_ORIGIN
+        value: "*"
       - key: LIVEKIT_API_KEY
         sync: false
       - key: LIVEKIT_API_SECRET
         sync: false
       - key: LIVEKIT_URL
         sync: false
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: newchatapp-redis
-          property: connectionString
+      # Optional: S3 configuration (uncomment if using S3)
+      # - key: USE_S3
+      #   value: "false"
+      # - key: S3_BUCKET
+      #   sync: false
+      # - key: S3_REGION
+      #   value: "us-east-1"
+      # - key: AWS_ACCESS_KEY_ID
+      #   sync: false
+      # - key: AWS_SECRET_ACCESS_KEY
+      #   sync: false
 
 databases:
   - name: newchatapp-db
     plan: free
     region: oregon
 
-redis:
+redisInstances:
   - name: newchatapp-redis
     plan: free
     region: oregon
