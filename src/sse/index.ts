@@ -27,13 +27,13 @@ interface SSEClient {
 class SSEManager {
   // Map: clientId -> SSEClient
   private clients: Map<string, SSEClient> = new Map();
-  
+
   // Map: userId -> Set<clientId>
   private userClients: Map<string, Set<string>> = new Map();
-  
+
   // Map: conversationId -> Set<clientId>
   private conversationClients: Map<string, Set<string>> = new Map();
-  
+
   private eventCounter: number = 0;
 
   /**
@@ -117,19 +117,19 @@ class SSEManager {
 
       // Build SSE message
       let message = '';
-      
+
       if (event.id || eventId) {
         message += `id: ${event.id || eventId}\n`;
       }
-      
+
       if (event.event) {
         message += `event: ${event.event}\n`;
       }
-      
+
       if (event.retry) {
         message += `retry: ${event.retry}\n`;
       }
-      
+
       message += `data: ${JSON.stringify(event.data)}\n\n`;
 
       client.response.write(message);
@@ -185,7 +185,7 @@ class SSEManager {
       return 0;
     }
 
-    const memberIds = conversation.members.map((member) => member.userId);
+    const memberIds = conversation.members.map((member: { userId: string }) => member.userId);
     let sentCount = 0;
 
     const event: SSEEvent = {
@@ -194,7 +194,7 @@ class SSEManager {
     };
 
     // Send to all clients of conversation members
-    memberIds.forEach((userId) => {
+    memberIds.forEach((userId: string) => {
       sentCount += this.sendEventToUser(userId, eventName, payload);
     });
 

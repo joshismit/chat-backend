@@ -11,6 +11,9 @@ export {
   MessageStatus,
   ConversationType,
   DeviceType,
+  Call,
+  CallType,
+  CallStatus,
 } from '@prisma/client';
 
 // Re-export types for backward compatibility
