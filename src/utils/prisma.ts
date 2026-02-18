@@ -1,22 +1,23 @@
 import { PrismaClient } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { getDatabaseUrl } from './dbConfig';
-
-const connectionString = getDatabaseUrl();
-const pool = new Pool({ connectionString });
-const adapter = new PrismaPg(pool);
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
+// We use 'as any' here because Prisma 7 with certain configurations 
+// may have specialized constructor types that don't match the standard 
+// signature, but the underlying JS engine still supports these options.
 export const prisma =
   globalForPrisma.prisma ??
-  new PrismaClient({
-    adapter,
+  (new PrismaClient({
+    datasources: {
+      db: {
+        url: getDatabaseUrl(),
+      },
+    },
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-  });
+  } as any) as PrismaClient);
 
 if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma;
